@@ -6,6 +6,7 @@ from .base import BaseTool
 from .bash import BashTool
 from .file import FileTool
 from .web import WebTool
+from .browser import BrowserTool
 from ..types import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -14,14 +15,28 @@ logger = logging.getLogger(__name__)
 class ToolRegistry:
     """Registry of all available tools for the agent."""
 
-    def __init__(self):
-        """Initialize tool registry with default tools."""
-        self.tools: Dict[str, BaseTool] = {}
+    def __init__(self, config: Dict[str, Any] = None):
+        """Initialize tool registry with default tools.
 
-        # Register default tools
-        self.register(BashTool())
+        Args:
+            config: Configuration dictionary for tools
+        """
+        self.tools: Dict[str, BaseTool] = {}
+        self.config = config or {}
+
+        # Get safety config
+        safety_config = self.config.get('safety', {})
+
+        # Register default tools with configuration
+        self.register(BashTool(
+            allowed_commands=safety_config.get('allowed_commands', []),
+            blocked_commands=safety_config.get('blocked_commands', []),
+            allow_sudo=safety_config.get('allow_sudo', False),
+            allowed_sudo_commands=safety_config.get('allowed_sudo_commands', [])
+        ))
         self.register(FileTool())
         self.register(WebTool())
+        self.register(BrowserTool())
 
     def register(self, tool: BaseTool):
         """Register a tool.

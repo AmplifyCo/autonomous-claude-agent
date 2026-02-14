@@ -15,6 +15,11 @@ pyautogui>=0.9.54
 pillow>=10.0.0
 mss>=9.0.1
 
+# Browser Automation
+selenium>=4.16.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
 # Vector Database for Context Management
 chromadb>=0.4.22
 sentence-transformers>=2.2.2

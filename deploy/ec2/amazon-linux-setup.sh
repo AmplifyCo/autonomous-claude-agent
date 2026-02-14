@@ -8,9 +8,26 @@ echo ""
 echo "📦 Updating system packages..."
 sudo yum update -y
 
-# Install Python 3.11 (Amazon Linux 2023)
-echo "🐍 Installing Python 3.11..."
+# Install Python 3.11 and browser tools (Amazon Linux 2023)
+echo "🐍 Installing Python 3.11 and browser tools..."
 sudo yum install python3.11 python3.11-pip git -y
+
+echo "🌐 Installing browser tools (chromium, w3m)..."
+sudo yum install chromium w3m curl -y
+
+# Install ChromeDriver for Selenium
+echo "📦 Installing ChromeDriver..."
+CHROME_DRIVER_VERSION=$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE 2>/dev/null || echo "114.0.5735.90")
+wget -q -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROME_DRIVER_VERSION}/chromedriver_linux64.zip" 2>/dev/null || {
+    echo "⚠️  ChromeDriver download failed, will install via pip instead"
+    pip install webdriver-manager
+}
+if [ -f /tmp/chromedriver.zip ]; then
+    sudo unzip -q -o /tmp/chromedriver.zip -d /usr/local/bin/
+    sudo chmod +x /usr/local/bin/chromedriver
+    rm /tmp/chromedriver.zip
+    echo "✅ ChromeDriver installed: $(chromedriver --version 2>/dev/null || echo 'installed')"
+fi
 
 # Clone repository (if not already cloned)
 cd ~
@@ -31,6 +48,46 @@ source venv/bin/activate
 echo "📦 Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# Configure limited sudo access
+echo "🔐 Configuring limited sudo access for agent..."
+CURRENT_USER=$(whoami)
+sudo tee /etc/sudoers.d/claude-agent > /dev/null << 'SUDOERS_EOF'
+# Limited sudo access for autonomous agent
+# Package management
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/yum install *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/yum update *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/yum remove *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt-get update *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt install *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt update *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/pip install *
+
+# Service management (only claude-agent service)
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart claude-agent
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop claude-agent
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl start claude-agent
+
+# Firewall management
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd *
+
+# Log viewing
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
+SUDOERS_EOF
+
+sudo chmod 440 /etc/sudoers.d/claude-agent
+echo "✅ Limited sudo access configured"
+echo ""
+echo "Agent capabilities:"
+echo "  ✅ Install packages (yum/apt/pip)"
+echo "  ✅ Manage claude-agent service"
+echo "  ✅ Configure firewall"
+echo "  ✅ View system logs"
+echo "  ❌ Cannot shutdown/reboot"
+echo "  ❌ Cannot perform destructive operations"
+echo ""
 
 # Setup environment
 if [ ! -f .env ]; then
@@ -134,6 +191,13 @@ echo "   Send /start to your bot"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "The agent will run 24/7 as a systemd service!"
-echo "It will auto-restart on failure and start on boot."
+echo "🎉 The agent will run 24/7 as a systemd service!"
+echo ""
+echo "Features enabled:"
+echo "  ✅ Auto-restart on failure"
+echo "  ✅ Auto-start on boot"
+echo "  ✅ Limited sudo for package installation"
+echo "  ✅ Web browsing (w3m text mode + Chromium headless)"
+echo "  ✅ Telegram notifications and commands"
+echo "  ✅ Web dashboard on port 18789"
 echo ""

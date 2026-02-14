@@ -13,6 +13,24 @@ agent:
 
   safety:
     max_file_size_mb: 10
+    allow_sudo: true  # Enable limited sudo access
+    allowed_sudo_commands:
+      # Package management
+      - sudo yum install
+      - sudo yum update
+      - sudo yum remove
+      - sudo apt-get install
+      - sudo apt-get update
+      - sudo apt install
+      - sudo apt update
+      - sudo pip install
+      # Service management
+      - sudo systemctl restart claude-agent
+      - sudo systemctl status
+      # Firewall
+      - sudo firewall-cmd
+      # Logs
+      - sudo journalctl
     allowed_commands:
       - npm
       - pip
@@ -21,11 +39,20 @@ agent:
       - pytest
       - node
       - bash
+      - w3m
+      - chromium
+      - chromium-browser
     blocked_commands:
       - rm -rf /
       - sudo rm
+      - sudo shutdown
+      - sudo reboot
+      - sudo poweroff
+      - sudo halt
       - format
       - mkfs
+      - dd if=/dev/zero
+      - sudo dd
 
 brain:
   vector_db:
@@ -43,6 +70,7 @@ tools:
     - bash
     - file
     - web
+    - browser
 
 monitoring:
   telegram:

@@ -26,21 +26,35 @@ class BashTool(BaseTool):
         }
     }
 
-    def __init__(self, allowed_commands: List[str] = None, blocked_commands: List[str] = None):
+    def __init__(
+        self,
+        allowed_commands: List[str] = None,
+        blocked_commands: List[str] = None,
+        allow_sudo: bool = False,
+        allowed_sudo_commands: List[str] = None
+    ):
         """Initialize BashTool.
 
         Args:
             allowed_commands: List of allowed command prefixes (None = all allowed)
             blocked_commands: List of blocked command patterns
+            allow_sudo: Whether to allow limited sudo commands
+            allowed_sudo_commands: List of allowed sudo command patterns
         """
         self.allowed_commands = allowed_commands or []
         self.blocked_commands = blocked_commands or [
             "rm -rf /",
             "sudo rm",
+            "sudo shutdown",
+            "sudo reboot",
+            "sudo poweroff",
             "format",
             "mkfs",
             "dd if=",
+            "sudo dd",
         ]
+        self.allow_sudo = allow_sudo
+        self.allowed_sudo_commands = allowed_sudo_commands or []
 
     async def execute(self, command: str, timeout: int = 120) -> ToolResult:
         """Execute a bash command.
@@ -52,7 +66,7 @@ class BashTool(BaseTool):
         Returns:
             ToolResult with command output
         """
-        # Security check
+        # Security check - blocked commands first
         if self._is_blocked(command):
             logger.warning(f"Blocked dangerous command: {command}")
             return ToolResult(
@@ -60,7 +74,25 @@ class BashTool(BaseTool):
                 error=f"Command blocked for safety: {command}"
             )
 
-        if self.allowed_commands and not self._is_allowed(command):
+        # Check if it's a sudo command
+        if command.strip().lower().startswith('sudo '):
+            if not self.allow_sudo:
+                logger.warning(f"Sudo not allowed: {command}")
+                return ToolResult(
+                    success=False,
+                    error="Sudo commands are not allowed. Configure allow_sudo=true to enable."
+                )
+
+            # Check if sudo command is in allowed list
+            if not self._is_sudo_allowed(command):
+                logger.warning(f"Sudo command not in allowed list: {command}")
+                return ToolResult(
+                    success=False,
+                    error=f"This sudo command is not allowed. Allowed patterns: {', '.join(self.allowed_sudo_commands)}"
+                )
+
+        # Check allowed commands (non-sudo)
+        elif self.allowed_commands and not self._is_allowed(command):
             logger.warning(f"Command not in allowed list: {command}")
             return ToolResult(
                 success=False,
@@ -146,5 +178,23 @@ class BashTool(BaseTool):
         command_lower = command.lower().strip()
         for allowed in self.allowed_commands:
             if command_lower.startswith(allowed.lower()):
+                return True
+        return False
+
+    def _is_sudo_allowed(self, command: str) -> bool:
+        """Check if sudo command is in allowed sudo list.
+
+        Args:
+            command: Sudo command to check
+
+        Returns:
+            True if allowed, False otherwise
+        """
+        if not self.allowed_sudo_commands:
+            return False  # No sudo commands allowed if list is empty
+
+        command_lower = command.lower().strip()
+        for allowed_pattern in self.allowed_sudo_commands:
+            if command_lower.startswith(allowed_pattern.lower()):
                 return True
         return False

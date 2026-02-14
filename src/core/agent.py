@@ -3,7 +3,9 @@
 import logging
 from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from pathlib import Path
 import json
+import yaml
 
 from .config import AgentConfig
 from .types import ToolResult, Message
@@ -31,7 +33,17 @@ class AutonomousAgent:
         """
         self.config = config
         self.api_client = AnthropicClient(config.api_key)
-        self.tools = ToolRegistry()
+
+        # Load YAML config for tool registry
+        yaml_config = {}
+        config_path = Path("config/agent.yaml")
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                yaml_config = yaml.safe_load(f) or {}
+
+        # Initialize tools with safety configuration
+        tool_config = yaml_config.get("agent", {})
+        self.tools = ToolRegistry(config=tool_config)
         self.brain = brain
 
         logger.info(f"Initialized AutonomousAgent with {config.default_model}")
