@@ -14,7 +14,9 @@ from src.core.brain.core_brain import CoreBrain
 from src.core.brain.digital_clone_brain import DigitalCloneBrain
 from src.core.spawner.agent_factory import AgentFactory
 from src.core.spawner.orchestrator import Orchestrator
-from ...integrations.anthropic_client import AnthropicClient
+from src.integrations.anthropic_client import AnthropicClient
+from src.utils.telegram_notifier import TelegramNotifier, TelegramCommandHandler
+from src.utils.dashboard import Dashboard
 
 # Setup logging
 logging.basicConfig(
@@ -44,6 +46,19 @@ async def main():
         else:
             logger.info("🧠 Initializing DigitalCloneBrain for production...")
             brain = DigitalCloneBrain(config.digital_clone_brain_path)
+
+        # Initialize monitoring systems
+        logger.info("📊 Initializing monitoring systems...")
+        telegram = TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id)
+        dashboard = Dashboard(config.dashboard_host, config.dashboard_port)
+
+        # Send startup notification
+        await telegram.notify(
+            f"🚀 *Agent Starting*\n\n"
+            f"Mode: {'Self-Build' if config.self_build_mode else 'Production'}\n"
+            f"Model: {config.default_model}",
+            level="info"
+        )
 
         # Initialize agent
         logger.info("🤖 Initializing autonomous agent...")
@@ -81,7 +96,28 @@ async def main():
             logger.info("\n💡 Agent is ready! You can now:")
             logger.info("   - Call agent.run(task) to execute tasks autonomously")
             logger.info("   - Use orchestrator to spawn multiple sub-agents")
-            logger.info("   - Test with simple tasks to verify functionality")
+            logger.info("   - Monitor via Telegram commands or web dashboard")
+
+        # Start dashboard server (non-blocking)
+        if config.dashboard_enabled and dashboard.enabled:
+            logger.info(f"\n🌐 Dashboard available at: http://0.0.0.0:{config.dashboard_port}")
+            logger.info("   (Will start when agent runs)")
+
+        # Show Telegram info
+        if telegram.enabled:
+            logger.info(f"\n📱 Telegram notifications enabled")
+            logger.info("   Send /start to your bot to interact")
+
+        # Keep running (for systemd service)
+        logger.info("\n✅ Agent initialized and ready!")
+        logger.info("Keeping process alive for systemd service...")
+
+        # Keep alive indefinitely
+        try:
+            await asyncio.Future()  # Run forever
+        except KeyboardInterrupt:
+            logger.info("\n👋 Shutting down gracefully...")
+            await telegram.notify("Agent shutting down", level="warning")
 
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
