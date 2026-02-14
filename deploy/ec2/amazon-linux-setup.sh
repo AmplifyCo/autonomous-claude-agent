@@ -14,14 +14,14 @@ sudo yum install python3.11 python3.11-pip git -y
 
 echo "🌐 Installing browser tools (w3m)..."
 # Install w3m (always available)
-sudo yum install w3m -y
+# Use --skip-broken to avoid curl-minimal conflicts
+sudo yum install w3m -y --skip-broken --exclude=curl
 
-# Check if curl is available (curl-minimal is fine, don't replace it)
+# curl-minimal (pre-installed) provides curl command, no need to install full curl
 if ! command -v curl &> /dev/null; then
-    echo "Installing curl..."
-    sudo yum install curl -y
+    echo "⚠️  curl not available, some features may not work"
 else
-    echo "✅ curl already available (curl-minimal)"
+    echo "✅ curl available (using curl-minimal)"
 fi
 
 # Try to install chromium (may not be available on all Amazon Linux versions)
