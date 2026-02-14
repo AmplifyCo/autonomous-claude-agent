@@ -57,21 +57,24 @@ else
     echo "✅ Sufficient disk space: ${AVAILABLE_GB}GB"
 fi
 
-# Check available RAM (need at least 2GB, recommend 4GB)
-TOTAL_RAM=$(free -g | grep Mem | awk '{print $2}')
+# Check available RAM (need at least 1.8GB, recommend 4GB)
+# Use MB for accuracy, convert to GB for display
+TOTAL_RAM_MB=$(free -m | grep Mem | awk '{print $2}')
+TOTAL_RAM_GB=$(echo "scale=1; $TOTAL_RAM_MB / 1024" | bc)
 
-echo "🧠 Total RAM: ${TOTAL_RAM}GB"
+echo "🧠 Total RAM: ${TOTAL_RAM_GB}GB"
 
-if [ $TOTAL_RAM -lt 2 ]; then
+# Require at least 1800 MB (1.8 GB) to account for OS overhead on 2GB instances
+if [ $TOTAL_RAM_MB -lt 1800 ]; then
     echo "❌ ERROR: Insufficient RAM!"
-    echo "   Required: At least 2GB (4GB recommended)"
-    echo "   Available: ${TOTAL_RAM}GB"
+    echo "   Required: At least 1.8GB (4GB recommended)"
+    echo "   Available: ${TOTAL_RAM_GB}GB"
     echo ""
     echo "Please use a larger EC2 instance type (t3.small or larger)"
     exit 1
-elif [ $TOTAL_RAM -lt 4 ]; then
+elif [ $TOTAL_RAM_MB -lt 4096 ]; then
     echo "⚠️  WARNING: RAM is less than recommended"
-    echo "   Available: ${TOTAL_RAM}GB (Recommended: 4GB)"
+    echo "   Available: ${TOTAL_RAM_GB}GB (Recommended: 4GB)"
     echo "   Agent performance may be limited"
     read -p "Continue anyway? (y/N): " -n 1 -r
     echo
@@ -80,7 +83,7 @@ elif [ $TOTAL_RAM -lt 4 ]; then
         exit 1
     fi
 else
-    echo "✅ Sufficient RAM: ${TOTAL_RAM}GB"
+    echo "✅ Sufficient RAM: ${TOTAL_RAM_GB}GB"
 fi
 
 # Check CPU cores (1 core minimum, 2+ recommended)
@@ -109,7 +112,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "System Requirements Summary:"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Disk Space: ${AVAILABLE_GB}GB (Minimum: 20GB, Recommended: 40GB)"
-echo "  RAM: ${TOTAL_RAM}GB (Minimum: 2GB, Recommended: 4GB)"
+echo "  RAM: ${TOTAL_RAM_GB}GB (Minimum: 1.8GB, Recommended: 4GB)"
 echo "  CPU Cores: ${CPU_CORES} (Minimum: 1, Recommended: 2+)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
