@@ -122,17 +122,35 @@ async def main():
         # Initialize Telegram chat with webhooks
         telegram_chat = None
         if telegram.enabled and config.telegram_bot_token and config.telegram_chat_id:
-            # Get EC2 public IP for webhook URL
+            # Check for Cloudflare tunnel URL first (HTTPS, permanent)
             import subprocess
-            try:
-                public_ip = subprocess.check_output(
-                    ["curl", "-s", "ifconfig.me"],
-                    timeout=5
-                ).decode().strip()
-                webhook_url = f"http://{public_ip}:{config.dashboard_port}/telegram/webhook"
-            except:
-                webhook_url = None
-                logger.warning("Could not determine public IP for webhook")
+            import json
+            webhook_url = None
+
+            # Try to read Cloudflare tunnel URL
+            tunnel_info_path = Path("data/cloudflare_tunnel.json")
+            if tunnel_info_path.exists():
+                try:
+                    with open(tunnel_info_path, 'r') as f:
+                        tunnel_info = json.load(f)
+                        webhook_url = tunnel_info.get("webhook_url")
+                        logger.info(f"🌐 Using Cloudflare Tunnel: {webhook_url}")
+                except Exception as e:
+                    logger.warning(f"Could not read Cloudflare tunnel info: {e}")
+
+            # Fallback to HTTP with public IP (will fail with Telegram)
+            if not webhook_url:
+                try:
+                    public_ip = subprocess.check_output(
+                        ["curl", "-s", "ifconfig.me"],
+                        timeout=5
+                    ).decode().strip()
+                    webhook_url = f"http://{public_ip}:{config.dashboard_port}/telegram/webhook"
+                    logger.warning("⚠️  Using HTTP webhook URL - Telegram requires HTTPS!")
+                    logger.warning("   Run: bash deploy/cloudflare/setup-tunnel.sh")
+                except:
+                    webhook_url = None
+                    logger.warning("Could not determine webhook URL")
 
             telegram_chat = TelegramChat(
                 bot_token=config.telegram_bot_token,
@@ -146,7 +164,7 @@ async def main():
             if dashboard.enabled:
                 dashboard.set_telegram_chat(telegram_chat)
 
-            logger.info("💬 Telegram chat interface initialized (webhook mode)")
+            logger.info("💬 Telegram chat interface initialized")
 
         # Start dashboard server (non-blocking)
         dashboard_task = None
