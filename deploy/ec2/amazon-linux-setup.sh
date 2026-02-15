@@ -97,6 +97,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "✅ All system requirements met! Proceeding with installation..."
 echo ""
+
+# Set up temp directory on main disk (not tmpfs which is often <1GB)
+echo "📁 Setting up temp directory on main disk..."
+export TMPDIR=~/tmp_pip
+mkdir -p $TMPDIR
+echo "   Using: $TMPDIR (instead of /tmp which is only $(df -h /tmp | tail -1 | awk '{print $2}'))"
+echo ""
+
 sleep 2
 
 # Update system
@@ -174,16 +182,8 @@ source venv/bin/activate
 
 # Install dependencies
 echo "📦 Installing Python dependencies..."
-
-# Set TMPDIR to use main disk instead of tmpfs /tmp (which is often <1GB)
-export TMPDIR=~/tmp_pip
-mkdir -p $TMPDIR
-
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Clean up temporary directory
-rm -rf $TMPDIR
 
 # Configure limited sudo access
 echo "🔐 Configuring limited sudo access for agent..."
@@ -327,6 +327,9 @@ rm -f /tmp/claude-agent.service 2>/dev/null || true
 
 # Clean up downloaded setup script if it exists
 rm -f ~/amazon-linux-setup.sh 2>/dev/null || true
+
+# Clean up temp directory
+rm -rf ~/tmp_pip 2>/dev/null || true
 
 # Get disk space after cleanup
 FINAL_SPACE=$(df / | tail -1 | awk '{print $4}')
