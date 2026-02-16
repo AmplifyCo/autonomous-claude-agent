@@ -385,24 +385,36 @@ Respond only with valid JSON, no explanation."""
             Conversational response
         """
         try:
-            # Use Claude to generate a helpful response
-            prompt = f"""You are an autonomous AI agent running on EC2. A user just sent you this message:
+            # Get actual agent status for context
+            uptime = datetime.now() - self.agent.start_time if hasattr(self.agent, 'start_time') else None
+            uptime_str = f"{uptime.seconds // 3600}h {(uptime.seconds % 3600) // 60}m" if uptime else "Unknown"
 
-"{message}"
-
-Respond naturally and helpfully. You can:
-- Answer questions about your status
-- Explain what you're currently doing
-- Help with tasks
-- Provide information about your capabilities
-
-Keep responses concise (2-3 sentences) and friendly.
-"""
-
+            # Use Claude with system message to act as the autonomous agent
             response = await self.anthropic_client.create_message(
                 model="claude-haiku-4-5",
-                max_tokens=150,
-                messages=[{"role": "user", "content": prompt}]
+                max_tokens=200,
+                system=f"""You are an autonomous AI agent system deployed on AWS EC2, running 24/7 as a systemd service. Your purpose is to help your user manage tasks, monitor systems, and execute commands remotely via Telegram.
+
+Current Status:
+- Uptime: {uptime_str}
+- Model: {self.agent.config.model}
+- Location: EC2 instance (Amazon Linux)
+- Web Dashboard: Available via Cloudflare Tunnel
+
+Your Capabilities:
+- Check system status and health
+- Pull git updates and restart
+- Monitor logs
+- Execute tasks autonomously
+- Report on ongoing operations
+
+Response Guidelines:
+- Be helpful, concise (2-3 sentences), and friendly
+- Refer to yourself as "I" or "the agent"
+- Focus on your actual operational capabilities
+- Don't discuss your underlying model architecture
+- Help the user understand what you're doing and can do""",
+                messages=[{"role": "user", "content": message}]
             )
 
             return response.content[0].text.strip()
