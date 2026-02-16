@@ -334,6 +334,176 @@ fi
 echo "📁 Creating data directories..."
 mkdir -p data/chroma data/core_brain data/digital_clone_brain data/memory data/logs credentials
 
+# ============================================
+# Cloudflare Tunnel Setup (Optional)
+# ============================================
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Cloudflare Tunnel Setup (for Telegram webhooks)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "Cloudflare Tunnel provides a permanent HTTPS URL for your agent."
+echo "This is required for Telegram webhooks (instant messaging)."
+echo ""
+read -p "Do you want to set up Cloudflare Tunnel? (y/n): " setup_tunnel
+
+if [[ "$setup_tunnel" =~ ^[Yy]$ ]]; then
+    # Install cloudflared
+    echo ""
+    echo "📦 Installing cloudflared..."
+    if command -v cloudflared &> /dev/null; then
+        echo "✅ cloudflared already installed: $(cloudflared --version)"
+    else
+        curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared
+        chmod +x /tmp/cloudflared
+        sudo mv /tmp/cloudflared /usr/local/bin/cloudflared
+        echo "✅ cloudflared installed: $(cloudflared --version)"
+    fi
+
+    # Check if already authenticated
+    if [ ! -f ~/.cloudflared/cert.pem ]; then
+        echo ""
+        echo "🔐 Cloudflare Authentication Required"
+        echo ""
+        echo "This will open a browser window. Please:"
+        echo "1. Login to your Cloudflare account"
+        echo "2. Authorize the tunnel"
+        echo "3. Return here when done"
+        echo ""
+        read -p "Press Enter to start authentication..."
+
+        cloudflared tunnel login
+
+        echo ""
+        echo "✅ Authentication complete!"
+    else
+        echo "✅ Already authenticated with Cloudflare"
+    fi
+
+    # Prompt for domain
+    echo ""
+    echo "📋 Domain Configuration"
+    echo ""
+    read -p "Enter your domain name (e.g., amplify-pixels.com): " user_domain
+    read -p "Enter subdomain for webhook (e.g., webhook): " subdomain
+
+    TUNNEL_HOSTNAME="${subdomain}.${user_domain}"
+
+    # Create or use existing tunnel
+    TUNNEL_NAME="claude-agent"
+
+    if cloudflared tunnel list 2>/dev/null | grep -q "$TUNNEL_NAME"; then
+        echo "✅ Using existing tunnel: $TUNNEL_NAME"
+        TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
+    else
+        echo "🚇 Creating new tunnel: $TUNNEL_NAME"
+        TUNNEL_ID=$(cloudflared tunnel create "$TUNNEL_NAME" 2>&1 | grep -oP 'Created tunnel .* with id \K[a-f0-9-]+')
+        echo "✅ Created tunnel: $TUNNEL_ID"
+    fi
+
+    # Create DNS route
+    echo "🌐 Creating DNS route: $TUNNEL_HOSTNAME"
+    cloudflared tunnel route dns "$TUNNEL_NAME" "$TUNNEL_HOSTNAME" || {
+        echo "⚠️  DNS route may already exist, continuing..."
+    }
+
+    # Create tunnel config
+    mkdir -p ~/.cloudflared
+    cat > ~/.cloudflared/config.yml << EOF
+tunnel: $TUNNEL_ID
+credentials-file: $HOME/.cloudflared/$TUNNEL_ID.json
+
+ingress:
+  - hostname: $TUNNEL_HOSTNAME
+    service: http://localhost:18789
+  - service: http_status:404
+EOF
+
+    echo "✅ Tunnel configuration created"
+
+    # Create cloudflared systemd service
+    sudo tee /etc/systemd/system/cloudflared.service > /dev/null << EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+ExecStart=/usr/local/bin/cloudflared tunnel --config $HOME/.cloudflared/config.yml run $TUNNEL_NAME
+Restart=always
+RestartSec=10
+StandardOutput=append:$CURRENT_DIR/data/logs/cloudflared.log
+StandardError=append:$CURRENT_DIR/data/logs/cloudflared.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable cloudflared
+    sudo systemctl start cloudflared
+
+    echo "✅ Cloudflare Tunnel service started"
+
+    # Save tunnel info
+    cat > data/cloudflare_tunnel.json << EOF
+{
+  "tunnel_mode": "named",
+  "tunnel_id": "$TUNNEL_ID",
+  "tunnel_name": "$TUNNEL_NAME",
+  "tunnel_url": "https://$TUNNEL_HOSTNAME",
+  "webhook_url": "https://$TUNNEL_HOSTNAME/telegram/webhook",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+    echo "💾 Tunnel info saved to data/cloudflare_tunnel.json"
+
+    # Wait for tunnel to connect
+    echo "⏳ Waiting for tunnel to connect..."
+    sleep 5
+
+    # Set up Telegram webhook if bot token is configured
+    if grep -q "TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here" .env; then
+        echo ""
+        echo "⚠️  Telegram bot token not configured yet"
+        echo "   After editing .env, run this to set webhook:"
+        echo "   curl -X POST \"https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/setWebhook\" \\"
+        echo "     -H \"Content-Type: application/json\" \\"
+        echo "     -d '{\"url\": \"https://$TUNNEL_HOSTNAME/telegram/webhook\"}'"
+    else
+        # Try to set webhook automatically
+        TELEGRAM_BOT_TOKEN=$(grep TELEGRAM_BOT_TOKEN .env | cut -d '=' -f2 | tr -d ' "'"'"'')
+
+        if [ ! -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo ""
+            echo "📱 Setting up Telegram webhook..."
+            WEBHOOK_URL="https://$TUNNEL_HOSTNAME/telegram/webhook"
+
+            RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+                -H "Content-Type: application/json" \
+                -d "{\"url\": \"$WEBHOOK_URL\"}")
+
+            if echo "$RESPONSE" | grep -q '"ok":true'; then
+                echo "✅ Telegram webhook configured!"
+                echo "   Webhook: $WEBHOOK_URL"
+            else
+                echo "⚠️  Webhook setup failed. You can set it manually after starting the agent."
+            fi
+        fi
+    fi
+
+    echo ""
+    echo "✅ Cloudflare Tunnel setup complete!"
+    echo "   Your permanent URL: https://$TUNNEL_HOSTNAME"
+    echo ""
+else
+    echo "⏭️  Skipping Cloudflare Tunnel setup"
+    echo "   You can run deploy/cloudflare/setup-tunnel.sh later if needed"
+    echo ""
+fi
+
 # Install as systemd service
 echo "🔧 Installing systemd service..."
 CURRENT_USER=$(whoami)
@@ -452,10 +622,20 @@ echo "   sudo journalctl -u claude-agent -f"
 echo "   # Or: tail -f data/logs/agent.log"
 echo ""
 echo "5. Access web dashboard:"
-echo "   http://$(curl -s ifconfig.me):18789"
+if [ -f data/cloudflare_tunnel.json ]; then
+    TUNNEL_URL=$(grep -oP '"tunnel_url":\s*"\K[^"]+' data/cloudflare_tunnel.json)
+    echo "   $TUNNEL_URL (via Cloudflare Tunnel)"
+else
+    echo "   http://$(curl -s ifconfig.me):18789"
+    echo "   ⚠️  Note: If Telegram webhooks fail, set up Cloudflare Tunnel:"
+    echo "      bash deploy/cloudflare/setup-tunnel.sh"
+fi
 echo ""
 echo "6. Control via Telegram (if configured):"
-echo "   Send /start to your bot"
+echo "   Send 'What's your status?' to your bot"
+if [ -f data/cloudflare_tunnel.json ]; then
+    echo "   ✅ Webhook URL configured for instant responses"
+fi
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
