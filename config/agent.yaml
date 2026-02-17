@@ -8,11 +8,11 @@ agent:
     retry_attempts: 3
 
   models:
-    # Multi-tier cloud model configuration
+    # Multi-tier cloud model configuration (PRIMARY - when API works)
     # Safe to commit to git - no credentials here
     default: "claude-opus-4-6"      # Architect - complex planning & orchestration
-    subagent: "claude-sonnet-4-5"   # Workers - implementation tasks
-    chat: "claude-sonnet-4-5"       # Chat - conversation (Sonnet for quality)
+    subagent: "claude-sonnet-4-5"   # Workers - building & implementation
+    chat: "claude-haiku-4-5"        # Chat - conversation (fast, efficient)
     intent: "claude-haiku-4-5"      # Intent parsing - lightweight NLP
 
   safety:
@@ -89,36 +89,42 @@ monitoring:
 
 local_model:
   # ============================================================================
-  # LOCAL MODELS CONFIGURATION (CPU Inference)
+  # LOCAL MODELS - FALLBACK ONLY (CPU Inference)
   # ============================================================================
+  # ⚠️  IMPORTANT: These models are FALLBACK ONLY
+  # Used when Claude API fails (rate limits, timeouts, outages)
+  # Normal operation uses Claude models: Opus (architect), Sonnet (builder), Haiku (chat)
+  #
   # This file is committed to git - it contains model names, not credentials
   # Override endpoints in .env if using remote servers:
   #   LOCAL_MODEL_ENDPOINT=http://localhost:8000
   #   LOCAL_CODER_ENDPOINT=http://localhost:8001
 
-  # General Purpose Model: SmolLM2-1.7B
-  # Use case: Status checks, reports, monitoring, API fallback
-  enabled: true  # Enable local model (set false to disable)
+  # Fallback Model: SmolLM2-1.7B
+  # Activated ONLY when: Claude API rate limit (429), timeout, or unavailable
+  # NOT used during normal operations
+  enabled: true  # true = fallback enabled, false = fail if API down
   name: "HuggingFaceTB/SmolLM2-1.7B-Instruct"
   # Alternative options:
   #   - HuggingFaceTB/SmolLM2-360M-Instruct (ultra-fast, 2GB RAM)
   #   - microsoft/Phi-3-mini-4k-instruct (alternative, 8GB RAM)
   endpoint: null  # null = direct inference, or set in .env for server
-  use_for: "trivial,simple"
+  use_for: "fallback"  # ONLY as fallback, not primary
   max_tokens: 512
   temperature: 0.7
   device: "cpu"
 
-  # Specialized Coding Model: DeepSeek-R1-Distill-Qwen-1.5B
-  # Use case: Quick code changes, debugging, small fixes
+  # Fallback Coder: DeepSeek-R1-Distill-Qwen-1.5B
+  # Activated ONLY when: Claude API fails during code tasks
+  # NOT used during normal operations
   coder:
-    enabled: true  # Enable local coder (set false to disable)
+    enabled: true  # true = fallback enabled, false = fail if API down
     name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     # Alternative options:
     #   - Qwen/Qwen2.5-Coder-1.5B-Instruct (Qwen coding variant)
     #   - HuggingFaceTB/SmolLM2-1.7B-Instruct (use SmolLM2 for simple code)
     endpoint: null  # null = direct inference, or set in .env for server
-    use_for: "code_edit,debug,quick_fix"
+    use_for: "fallback"  # ONLY as fallback, not primary
     max_tokens: 1024
     temperature: 0.3  # Lower temperature for precise code
 
