@@ -8,10 +8,11 @@ agent:
     retry_attempts: 3
 
   models:
-    # Multi-tier model configuration
+    # Multi-tier cloud model configuration
+    # Safe to commit to git - no credentials here
     default: "claude-opus-4-6"      # Architect - complex planning & orchestration
     subagent: "claude-sonnet-4-5"   # Workers - implementation tasks
-    chat: "claude-haiku-4-5"        # Chat - simple conversations
+    chat: "claude-sonnet-4-5"       # Chat - conversation (Sonnet for quality)
     intent: "claude-haiku-4-5"      # Intent parsing - lightweight NLP
 
   safety:
@@ -87,18 +88,39 @@ monitoring:
     port: 18789
 
 local_model:
-  # Local model configuration (optional, runs on CPU)
-  # SmolLM2 is optimized for edge/CPU deployment - much faster than 7B models
-  enabled: false  # Set to true to enable local model
-  name: "HuggingFaceTB/SmolLM2-1.7B-Instruct"  # CPU-optimized, fast inference
-  # Alternatives: SmolLM2-360M-Instruct (ultra-fast), Phi-3-mini-4k-instruct
-  endpoint: null  # e.g., "http://localhost:8000" if using vLLM/Ollama server
-  use_for: "trivial,simple"  # Comma-separated: trivial, simple, chat, intent
+  # ============================================================================
+  # LOCAL MODELS CONFIGURATION (CPU Inference)
+  # ============================================================================
+  # This file is committed to git - it contains model names, not credentials
+  # Override endpoints in .env if using remote servers:
+  #   LOCAL_MODEL_ENDPOINT=http://localhost:8000
+  #   LOCAL_CODER_ENDPOINT=http://localhost:8001
 
-  # Performance settings
+  # General Purpose Model: SmolLM2-1.7B
+  # Use case: Status checks, reports, monitoring, API fallback
+  enabled: true  # Enable local model (set false to disable)
+  name: "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+  # Alternative options:
+  #   - HuggingFaceTB/SmolLM2-360M-Instruct (ultra-fast, 2GB RAM)
+  #   - microsoft/Phi-3-mini-4k-instruct (alternative, 8GB RAM)
+  endpoint: null  # null = direct inference, or set in .env for server
+  use_for: "trivial,simple"
   max_tokens: 512
   temperature: 0.7
-  device: "cpu"  # cpu or cuda
+  device: "cpu"
+
+  # Specialized Coding Model: DeepSeek-R1-Distill-Qwen-1.5B
+  # Use case: Quick code changes, debugging, small fixes
+  coder:
+    enabled: true  # Enable local coder (set false to disable)
+    name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    # Alternative options:
+    #   - Qwen/Qwen2.5-Coder-1.5B-Instruct (Qwen coding variant)
+    #   - HuggingFaceTB/SmolLM2-1.7B-Instruct (use SmolLM2 for simple code)
+    endpoint: null  # null = direct inference, or set in .env for server
+    use_for: "code_edit,debug,quick_fix"
+    max_tokens: 1024
+    temperature: 0.3  # Lower temperature for precise code
 
 auto_update:
   enabled: true

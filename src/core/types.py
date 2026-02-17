@@ -40,9 +40,14 @@ class AgentConfig:
 
     # Local Models (optional, for CPU inference)
     local_model_enabled: bool = False
-    local_model_name: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"  # Lightweight LLM for CPU
+    local_model_name: str = "HuggingFaceTB/SmolLM2-1.7B-Instruct"  # Status, reports, monitoring
     local_model_endpoint: Optional[str] = None  # e.g., "http://localhost:8000"
     local_model_for: str = "trivial,simple"  # Comma-separated: trivial, simple, chat, intent
+
+    # Specialized local models for specific tasks
+    local_coder_enabled: bool = False
+    local_coder_name: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"  # Quick code changes
+    local_coder_endpoint: Optional[str] = None  # Separate endpoint for coder model
 
     # Execution
     max_iterations: int = 50

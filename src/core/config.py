@@ -42,7 +42,12 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
         local_model_enabled=os.getenv("LOCAL_MODEL_ENABLED", str(local_model_config.get("enabled", False))).lower() == "true",
         local_model_name=os.getenv("LOCAL_MODEL_NAME", local_model_config.get("name", "HuggingFaceTB/SmolLM2-1.7B-Instruct")),
         local_model_endpoint=os.getenv("LOCAL_MODEL_ENDPOINT", local_model_config.get("endpoint")),
-        local_model_for=os.getenv("LOCAL_MODEL_FOR", local_model_config.get("use_for", "chat,intent")),
+        local_model_for=os.getenv("LOCAL_MODEL_FOR", local_model_config.get("use_for", "trivial,simple")),
+
+        # Specialized local coder model
+        local_coder_enabled=os.getenv("LOCAL_CODER_ENABLED", str(local_model_config.get("coder", {}).get("enabled", False))).lower() == "true",
+        local_coder_name=os.getenv("LOCAL_CODER_NAME", local_model_config.get("coder", {}).get("name", "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B")),
+        local_coder_endpoint=os.getenv("LOCAL_CODER_ENDPOINT", local_model_config.get("coder", {}).get("endpoint")),
 
         # Execution
         max_iterations=int(os.getenv("MAX_ITERATIONS", yaml_config.get("agent", {}).get("execution", {}).get("max_iterations", 50))),
