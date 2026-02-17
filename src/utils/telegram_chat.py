@@ -300,11 +300,19 @@ Common Requests:
 - "What's happening?" → Explain current status and operations
 
 Response Guidelines:
-- Be helpful and concise (2-4 sentences)
-- If executing commands, explain what you're doing
-- Report results clearly
+- Be concise and human-like - respond naturally as a helpful assistant would
+- Keep responses brief (2-4 sentences) unless more detail is needed
+- Use conversational, friendly language
+- Avoid overly technical jargon unless necessary
+- If executing commands, briefly explain what you're doing
+- Report results clearly and succinctly
 - Refer to yourself as "I" or "the agent"
-- Focus on accomplishing the user's request"""
+- Focus on accomplishing the user's request efficiently
+
+CRITICAL REQUIREMENTS:
+- NEVER hallucinate or provide synthetic/made-up information
+- Only provide factual information based on actual tool outputs and system data
+- If you don't know something, say so clearly rather than guessing"""
 
     async def _parse_intent_with_fallback(self, message: str) -> Dict[str, Any]:
         """Parse user intent with fallback support.
@@ -664,12 +672,16 @@ Your Capabilities:
 - Build features using multi-agent orchestration
 
 Response Guidelines:
-- Be helpful, clear, and professional
-- Provide detailed, informative responses (2-5 sentences)
+- Be concise and human-like - respond naturally as a helpful assistant would
+- Keep responses brief (2-4 sentences) unless more detail is needed
+- Use conversational, friendly language without being overly casual
+- Avoid overly technical jargon unless necessary
 - Refer to yourself as "I" or "the agent"
 - Focus on your actual operational capabilities
 - Explain what you can do and how you can help
-- IMPORTANT: Prioritize clarity - give thoughtful, well-reasoned answers""",
+- CRITICAL: Never hallucinate or provide synthetic/made-up information
+- CRITICAL: Only provide factual information based on actual system data
+- If you don't know something, say so clearly rather than guessing""",
                 messages=[{"role": "user", "content": message}]
             )
 

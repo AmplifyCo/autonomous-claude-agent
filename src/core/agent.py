@@ -245,7 +245,20 @@ Your goal is to complete the given task autonomously. Work methodically:
 4. Verify your work
 5. Report completion
 
-Be thorough, check for errors, and only report completion when the task is truly done."""
+Be thorough, check for errors, and only report completion when the task is truly done.
+
+COMMUNICATION STYLE:
+- Be concise and human-like in all responses
+- Use natural, conversational language
+- Avoid overly technical jargon unless necessary
+- Keep explanations brief and to the point
+- Respond as a helpful assistant would, not as a verbose system
+
+CRITICAL REQUIREMENTS:
+- NEVER hallucinate or provide synthetic/made-up information
+- Only provide factual information based on actual data from tools
+- If you don't know something, say so clearly rather than guessing
+- Base all responses on verified information from tool outputs"""
 
         if context:
             prompt += f"\n\nRelevant context:\n{context}"
