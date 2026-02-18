@@ -214,11 +214,20 @@ class TelegramChat:
             return await self._execute_intent(intent, message)
 
         else:
-            # Unknown intent or question - just chat (don't run full agent loop!)
-            # This handles questions like "What's pending?" efficiently
-            confidence = intent.get("confidence", 0.0)
-            logger.info(f"Unknown/conversational intent (confidence: {confidence:.2f}) - using chat")
-            return await self._chat(message)
+            # Check if this is a question about code/features/tasks
+            if self._is_code_question(message):
+                # Questions about code need tools to answer - use agent with limited iterations
+                logger.info(f"Code/feature question detected - using agent with tools (limited iterations)")
+                return await self.agent.run(
+                    task=f"Answer this question: {message}\n\nBe concise (2-4 sentences). Use tools to find factual information. Don't make assumptions.",
+                    max_iterations=5,  # Limited iterations to avoid timeout
+                    system_prompt=self._build_telegram_system_prompt()
+                )
+            else:
+                # General conversation - just chat (no tools needed)
+                confidence = intent.get("confidence", 0.0)
+                logger.info(f"Conversational intent (confidence: {confidence:.2f}) - using chat")
+                return await self._chat(message)
 
     async def _execute_with_fallback_model(self, message: str, error: Exception) -> str:
         """Execute with local fallback model (SmolLM2).
@@ -335,6 +344,30 @@ CRITICAL REQUIREMENTS:
                 # Simple local intent classification
                 return self._parse_intent_locally(message)
             raise
+
+    def _is_code_question(self, message: str) -> bool:
+        """Determine if a question requires access to codebase/tools.
+
+        Args:
+            message: User message
+
+        Returns:
+            True if this is a code/feature/task question
+        """
+        msg_lower = message.lower()
+
+        # Keywords that indicate questions about code, features, tasks, or project details
+        code_question_keywords = [
+            "pending", "todo", "feature", "task", "code", "file",
+            "function", "class", "implement", "working on",
+            "progress", "what's in", "show me", "find",
+            "search", "look for", "where is", "how does",
+            "explain", "what does", "codebase", "project",
+            "engine", "brain", "module", "component"
+        ]
+
+        # Check if any code question keyword is present
+        return any(keyword in msg_lower for keyword in code_question_keywords)
 
     def _parse_intent_locally(self, message: str) -> Dict[str, Any]:
         """Parse intent locally using simple keyword matching.
