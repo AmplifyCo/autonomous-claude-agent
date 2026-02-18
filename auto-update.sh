@@ -64,6 +64,14 @@ if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
         python3 -m pip install -r requirements.txt 2>&1 | tee -a "$LOG_FILE"
     fi
 
+    # Refresh global dt-setup if it changed and is installed globally
+    GLOBAL_DT="/usr/local/bin/dt-setup"
+    if [ -f "$GLOBAL_DT" ] && git diff --name-only "$LOCAL" "$REMOTE" | grep -q "^dt-setup$"; then
+        log "🔧 dt-setup changed, updating global copy..."
+        sudo cp "$SCRIPT_DIR/dt-setup" "$GLOBAL_DT" && sudo chmod +x "$GLOBAL_DT"
+        log "✅ Global dt-setup updated"
+    fi
+
     # Restart the bot
     log "🔄 Restarting Digital Twin bot..."
 
