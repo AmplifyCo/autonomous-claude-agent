@@ -98,11 +98,10 @@ productivity:
     dt_setup_cmd: "dt-setup calendar"
 
   reminders:
-    enabled: false
+    enabled: true
     display_name: "Reminders & ToDo"
     description: "Create and manage reminders and to-do lists"
-    coming_soon: true
-    dt_setup_cmd: "dt-setup reminders"
+    always_available: true
 
   notes:
     enabled: false

@@ -54,6 +54,9 @@ class ToolRegistry:
         # Register X (Twitter) tool if credentials provided
         self._register_x_tool()
 
+        # Register Reminder tool (always available, no credentials needed)
+        self._register_reminder_tool()
+
     def register(self, tool: BaseTool):
         """Register a tool.
 
@@ -237,7 +240,8 @@ class ToolRegistry:
                     api_key=api_key,
                     api_secret=api_secret,
                     access_token=access_token,
-                    access_token_secret=access_token_secret
+                    access_token_secret=access_token_secret,
+                    data_dir="./data"
                 )
 
                 self.register(x_tool)
@@ -251,3 +255,13 @@ class ToolRegistry:
 
         except Exception as e:
             logger.warning(f"Failed to register X tool: {e}")
+
+    def _register_reminder_tool(self):
+        """Register Reminder tool (always available, no credentials needed)."""
+        try:
+            from .reminder import ReminderTool
+            reminder_tool = ReminderTool(data_dir="./data")
+            self.register(reminder_tool)
+            logger.info("⏰ Reminder tool registered")
+        except Exception as e:
+            logger.warning(f"Failed to register Reminder tool: {e}")

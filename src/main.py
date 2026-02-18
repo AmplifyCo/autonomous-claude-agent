@@ -24,6 +24,7 @@ from src.channels.telegram_channel import TelegramChannel
 from src.utils.telegram_notifier import TelegramNotifier, TelegramCommandHandler
 from src.utils.dashboard import Dashboard
 from src.utils.auto_updater import AutoUpdater
+from src.core.scheduler import ReminderScheduler
 
 # Setup logging
 logging.basicConfig(
@@ -285,6 +286,10 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         logger.info("\n✅ Agent initialized and ready!")
         logger.info("Keeping process alive for systemd service...")
 
+        # Start reminder scheduler background task
+        reminder_scheduler = ReminderScheduler(telegram=telegram, data_dir="./data")
+        reminder_task = asyncio.create_task(reminder_scheduler.start())
+
         # Start auto-updater background task
         auto_update_task = None
         if auto_updater.enabled:
@@ -296,6 +301,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             await asyncio.Future()  # Run forever
         except KeyboardInterrupt:
             logger.info("\n👋 Shutting down gracefully...")
+            if reminder_task:
+                reminder_task.cancel()
             if auto_update_task:
                 auto_update_task.cancel()
             if dashboard_task:
