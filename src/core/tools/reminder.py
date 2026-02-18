@@ -2,8 +2,9 @@
 
 import json
 import logging
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from .base import BaseTool
@@ -37,7 +38,7 @@ class ReminderTool(BaseTool):
         },
         "remind_at": {
             "type": "string",
-            "description": "When to fire the reminder: YYYY-MM-DD HH:MM (for set_reminder)"
+            "description": "When to fire. Accepts absolute 'YYYY-MM-DD HH:MM' or relative like '30m', '2h', '1d', '90s', '1h30m' (for set_reminder)"
         },
         "reminder_id": {
             "type": "string",
@@ -93,23 +94,27 @@ class ReminderTool(BaseTool):
         if not message:
             return ToolResult(success=False, error="Reminder message is required")
         if not remind_at:
-            return ToolResult(success=False, error="remind_at time is required (format: YYYY-MM-DD HH:MM)")
+            return ToolResult(success=False, error="remind_at is required. Use 'YYYY-MM-DD HH:MM' or relative like '30m', '2h', '1d'")
 
-        # Parse the datetime
-        try:
-            remind_dt = datetime.strptime(remind_at.strip(), "%Y-%m-%d %H:%M")
-        except ValueError:
+        now = datetime.now()
+
+        # Try relative time first (e.g. "30m", "2h", "1d", "90s", "1h30m")
+        remind_dt = self._parse_relative_time(remind_at.strip(), now)
+
+        if not remind_dt:
+            # Try absolute datetime
             try:
-                # Also accept ISO format with T separator
-                remind_dt = datetime.fromisoformat(remind_at.strip())
+                remind_dt = datetime.strptime(remind_at.strip(), "%Y-%m-%d %H:%M")
             except ValueError:
-                return ToolResult(
-                    success=False,
-                    error=f"Invalid datetime format: '{remind_at}'. Use YYYY-MM-DD HH:MM"
-                )
+                try:
+                    remind_dt = datetime.fromisoformat(remind_at.strip())
+                except ValueError:
+                    return ToolResult(
+                        success=False,
+                        error=f"Invalid time format: '{remind_at}'. Use 'YYYY-MM-DD HH:MM' or relative like '30m', '2h', '1d'"
+                    )
 
         # Reject past reminders
-        now = datetime.now()
         if remind_dt < now:
             return ToolResult(
                 success=False,
@@ -193,6 +198,33 @@ class ReminderTool(BaseTool):
         logger.info(f"Reminder cancelled: {reminder_id}")
 
         return ToolResult(success=True, output=f"Reminder {reminder_id} cancelled.")
+
+    def _parse_relative_time(self, value: str, now: datetime) -> Optional[datetime]:
+        """Parse relative time strings like '30m', '2h', '1d', '90s', '1h30m'.
+
+        Returns datetime or None if not a relative format.
+        """
+        # Match patterns like: 30m, 2h, 1d, 90s, 1h30m, 2h15m
+        pattern = r'^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$'
+        match = re.match(pattern, value.lower().strip())
+        if not match:
+            return None
+
+        days, hours, minutes, seconds = match.groups()
+        if not any([days, hours, minutes, seconds]):
+            return None
+
+        delta = timedelta(
+            days=int(days or 0),
+            hours=int(hours or 0),
+            minutes=int(minutes or 0),
+            seconds=int(seconds or 0)
+        )
+
+        if delta.total_seconds() <= 0:
+            return None
+
+        return now + delta
 
     def _load_reminders(self) -> List[Dict[str, Any]]:
         """Load reminders from JSON file."""
