@@ -2,7 +2,8 @@
 
 import asyncio
 import logging
-from typing import List
+import re
+from typing import List, Tuple
 from .base import BaseTool
 from ..types import ToolResult
 
@@ -149,7 +150,7 @@ class BashTool(BaseTool):
             )
 
     def _is_blocked(self, command: str) -> bool:
-        """Check if command is blocked.
+        """Check if command is blocked using comprehensive security checks.
 
         Args:
             command: Command to check
@@ -158,8 +159,107 @@ class BashTool(BaseTool):
             True if blocked, False otherwise
         """
         command_lower = command.lower().strip()
+
+        # 1. Direct blocklist matching
         for blocked in self.blocked_commands:
             if blocked.lower() in command_lower:
+                logger.warning(f"Blocked by pattern: {blocked}")
+                return True
+
+        # 2. Detect command injection attempts
+        if self._has_command_injection(command):
+            logger.warning("Blocked: Command injection attempt detected")
+            return True
+
+        # 3. Check for sensitive file access
+        if self._accesses_sensitive_files(command):
+            logger.warning("Blocked: Sensitive file access attempt")
+            return True
+
+        # 4. Detect resource exhaustion patterns
+        if self._has_resource_exhaustion_pattern(command):
+            logger.warning("Blocked: Resource exhaustion pattern detected")
+            return True
+
+        # 5. Check for network attacks
+        if self._has_network_attack_pattern(command):
+            logger.warning("Blocked: Network attack pattern detected")
+            return True
+
+        return False
+
+    def _has_command_injection(self, command: str) -> bool:
+        """Detect command injection bypass attempts.
+
+        Catches: bash -c "dangerous", eval "dangerous", $(dangerous), etc.
+        """
+        dangerous_patterns = [
+            r'bash\s+-c\s+["\'].*rm.*-rf',  # bash -c "rm -rf"
+            r'sh\s+-c\s+["\'].*rm.*-rf',    # sh -c "rm -rf"
+            r'eval\s+["\'].*rm',             # eval "rm..."
+            r'\$\(.*rm.*-rf',                # $(rm -rf ...)
+            r'`.*rm.*-rf',                   # `rm -rf ...`
+            r'bash\s+-c\s+["\'].*shutdown',  # bash -c "shutdown"
+            r'bash\s+-c\s+["\'].*reboot',    # bash -c "reboot"
+        ]
+
+        for pattern in dangerous_patterns:
+            if re.search(pattern, command, re.IGNORECASE):
+                return True
+        return False
+
+    def _accesses_sensitive_files(self, command: str) -> bool:
+        """Check if command attempts to access sensitive files."""
+        sensitive_paths = [
+            '/etc/shadow',
+            '/etc/passwd',  # Reading is ok, but copying/modifying is not
+            '~/.ssh/id_rsa',
+            '/.ssh/',
+            '/root/',
+            '/etc/sudoers',
+        ]
+
+        # Only block write/copy operations to sensitive files
+        write_commands = ['cp', 'mv', 'tee', '>', '>>', 'chmod 777']
+
+        command_lower = command.lower()
+        for path in sensitive_paths:
+            if path in command_lower:
+                # Check if it's a write operation
+                for write_cmd in write_commands:
+                    if write_cmd in command_lower:
+                        return True
+        return False
+
+    def _has_resource_exhaustion_pattern(self, command: str) -> bool:
+        """Detect potential resource exhaustion attacks."""
+        exhaustion_patterns = [
+            r'while\s+true',           # while true; do ...; done
+            r'for\s+\(\(.*\)\)',       # Infinite for loop
+            r':\(\)\{.*:\|:&.*\};:',   # Fork bomb
+            r'yes\s+\|',               # yes | command (flood)
+            r'cat\s+/dev/zero',        # Memory flood
+            r'cat\s+/dev/urandom',     # CPU/memory flood
+        ]
+
+        for pattern in exhaustion_patterns:
+            if re.search(pattern, command, re.IGNORECASE):
+                return True
+        return False
+
+    def _has_network_attack_pattern(self, command: str) -> bool:
+        """Detect potential network attack commands."""
+        # Allow normal network tools, but block obvious attacks
+        attack_patterns = [
+            r'nmap.*-p.*1-65535',      # Port scan all ports
+            r'hping3',                  # DDoS tool
+            r'tcpdump.*-w',             # Network sniffing to file
+            r'nc.*-e\s+/bin/',          # Netcat reverse shell
+            r'nc.*-l.*-p',              # Netcat listener (backdoor)
+        ]
+
+        for pattern in attack_patterns:
+            if re.search(pattern, command, re.IGNORECASE):
                 return True
         return False
 
