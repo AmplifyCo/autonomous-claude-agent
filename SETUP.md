@@ -17,25 +17,27 @@ Quick start guide for setting up your Digital Twin bot with email and calendar i
 pip install -r requirements.txt
 ```
 
-### 2. Run Configuration Wizard
+### 2. Install dt-setup Command (One-Time)
 
-**Simple command (recommended):**
+**Using make (recommended):**
 ```bash
-./setup              # Full interactive wizard
-./setup email        # Configure email only
-./setup telegram     # Configure Telegram only
-./setup core         # Configure API keys only
+make install
 ```
 
-**Or use Python directly:**
+**Or using the install script:**
 ```bash
-python configure.py
+sudo ./install.sh
 ```
 
-**Install globally (optional):**
+This installs `dt-setup` to `/usr/local/bin` so you can run it like `python`, `git`, `npm` - from anywhere, no `./` needed.
+
+### 3. Run Configuration Wizard
+
 ```bash
-sudo ./install.sh    # Creates 'dt-setup' command
-dt-setup             # Run from anywhere
+dt-setup              # Full interactive wizard
+dt-setup email        # Configure email only
+dt-setup telegram     # Configure Telegram only
+dt-setup core         # Configure API keys only
 ```
 
 The interactive wizard will:
@@ -44,7 +46,7 @@ The interactive wizard will:
 - Prompt for your credentials
 - Update your `.env` file automatically
 
-### 3. Start the Bot
+### 4. Start the Bot
 
 ```bash
 python -m src.main
@@ -55,6 +57,10 @@ Check logs for successful tool registration:
 📧 Email tool registered
 📅 Calendar tool registered
 ```
+
+---
+
+**That's it!** From now on, just run `dt-setup` whenever you need to update credentials.
 
 ## Manual Setup
 
@@ -74,19 +80,23 @@ If you prefer to manually edit `.env`:
 
 ## Configuration Options
 
-### Simple Commands
+### Simple Commands (After Installation)
 
 ```bash
-./setup                   # Full wizard (all tools)
-./setup digital-twin      # Full wizard (alias)
-./setup core              # API keys only
-./setup telegram          # Telegram only
-./setup email             # Email only
-./setup calendar          # Calendar only
-./setup help              # Show help
+dt-setup                   # Full wizard (all tools)
+dt-setup digital-twin      # Full wizard (alias)
+dt-setup core              # API keys only
+dt-setup telegram          # Telegram only
+dt-setup email             # Email only
+dt-setup calendar          # Calendar only
+dt-setup help              # Show help
 ```
 
-### Python Commands (Advanced)
+Works from **any directory**, just like `git`, `python`, `npm`.
+
+### Advanced: Python Direct Usage
+
+If you haven't installed with `make install`, you can still use:
 
 ```bash
 python configure.py --email-only              # Email only

@@ -3,12 +3,12 @@
 # Simple wrapper for configure.py with friendly syntax
 #
 # Usage:
-#   setup                   # Full setup wizard
-#   setup core              # Configure API keys
-#   setup telegram          # Configure Telegram
-#   setup email             # Configure email
-#   setup calendar          # Configure calendar
-#   setup digital-twin      # Full setup (alias)
+#   dt-setup                # Full setup wizard
+#   dt-setup core           # Configure API keys
+#   dt-setup telegram       # Configure Telegram
+#   dt-setup email          # Configure email
+#   dt-setup calendar       # Configure calendar
+#   dt-setup digital-twin   # Full setup (alias)
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,12 +52,12 @@ case "$1" in
 Digital Twin Setup Tool
 
 Usage:
-  setup                   Full setup wizard (all tools)
-  setup digital-twin      Full setup (alias)
-  setup core              Configure API keys only
-  setup telegram          Configure Telegram bot only
-  setup email             Configure email only
-  setup calendar          Configure calendar only
+  dt-setup                Full setup wizard (all tools)
+  dt-setup digital-twin   Full setup (alias)
+  dt-setup core           Configure API keys only
+  dt-setup telegram       Configure Telegram bot only
+  dt-setup email          Configure email only
+  dt-setup calendar       Configure calendar only
 
 Aliases:
   digital-twin, all, full → Full setup
@@ -67,9 +67,9 @@ Aliases:
   calendar, cal           → Calendar configuration
 
 Examples:
-  setup                   # Interactive wizard for all tools
-  setup email             # Just configure email
-  setup core              # Just update API keys
+  dt-setup                # Interactive wizard for all tools
+  dt-setup email          # Just configure email
+  dt-setup core           # Just update API keys
 
 For advanced options, use:
   python3 configure.py --help
