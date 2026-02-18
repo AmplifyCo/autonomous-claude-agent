@@ -36,6 +36,9 @@ pyyaml>=6.0.1
 psutil>=5.9.7
 structlog>=24.1.0
 
+# Social Media Tools (X/Twitter OAuth 1.0a)
+requests-oauthlib>=1.3.1
+
 # Email & Calendar Tools (Gmail, Outlook, iCloud support)
 caldav>=1.3.6
 icalendar>=5.0.11

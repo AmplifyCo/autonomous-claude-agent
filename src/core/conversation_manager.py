@@ -959,11 +959,12 @@ USER INPUT BEGINS BELOW:
         if not text:
             return text
 
-        # Remove common XML wrapper tags, keeping inner content
-        # Matches <tag>, </tag>, and <tag attr="val">
+        # Remove ALL XML-like tags (anything that looks like <tag> or </tag>)
+        # but preserve legitimate angle brackets in math/code (e.g., x < 5)
+        # This catches <attemptcompletion>, <result>, <analysis>, <thinking>, etc.
         cleaned = re.sub(
-            r'</?(?:attemptcompletion|result|analysis|thinking|answer|response|output|bash|command|code_block)\b[^>]*>',
-            '', text, flags=re.IGNORECASE
+            r'</?[a-zA-Z_][a-zA-Z0-9_-]*(?:\s+[^>]*)?\s*/?>',
+            '', text
         )
 
         # Clean up excessive blank lines left behind

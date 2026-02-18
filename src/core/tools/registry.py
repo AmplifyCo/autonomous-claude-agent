@@ -225,17 +225,29 @@ class ToolRegistry:
     def _register_x_tool(self):
         """Register X (Twitter) tool if credentials provided in environment."""
         try:
+            api_key = os.getenv('X_API_KEY')
+            api_secret = os.getenv('X_API_SECRET')
             access_token = os.getenv('X_ACCESS_TOKEN')
+            access_token_secret = os.getenv('X_ACCESS_TOKEN_SECRET')
 
-            if access_token:
+            if all([api_key, api_secret, access_token, access_token_secret]):
                 from .x_tool import XTool
 
-                x_tool = XTool(access_token=access_token)
+                x_tool = XTool(
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    access_token=access_token,
+                    access_token_secret=access_token_secret
+                )
 
                 self.register(x_tool)
                 logger.info("🐦 X (Twitter) tool registered")
             else:
-                logger.debug("X tool not registered (missing X_ACCESS_TOKEN in .env)")
+                missing = [k for k, v in {
+                    'X_API_KEY': api_key, 'X_API_SECRET': api_secret,
+                    'X_ACCESS_TOKEN': access_token, 'X_ACCESS_TOKEN_SECRET': access_token_secret
+                }.items() if not v]
+                logger.debug(f"X tool not registered (missing: {', '.join(missing)})")
 
         except Exception as e:
             logger.warning(f"Failed to register X tool: {e}")

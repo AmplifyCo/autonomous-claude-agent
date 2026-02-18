@@ -43,7 +43,7 @@ social_media:
     display_name: "Post on X"
     description: "Post updates to X (Twitter) — no auto-interactions"
     coming_soon: false
-    env_vars: [X_CLIENT_ID, X_CLIENT_SECRET, X_ACCESS_TOKEN]
+    env_vars: [X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET]
     dt_setup_cmd: "dt-setup talent Post-on-X"
     library: xdk
     build_instructions: |
@@ -60,9 +60,10 @@ social_media:
         - Only post when explicitly asked by the user via Telegram.
       Add xdk to requirements.txt.
     credential_prompts:
-      X_CLIENT_ID: "X Client ID (from developer.x.com)"
-      X_CLIENT_SECRET: "X Client Secret"
-      X_ACCESS_TOKEN: "X Access Token (OAuth 2.0)"
+      X_API_KEY: "X API Key / Consumer Key (from developer.x.com)"
+      X_API_SECRET: "X API Secret / Consumer Secret"
+      X_ACCESS_TOKEN: "X Access Token"
+      X_ACCESS_TOKEN_SECRET: "X Access Token Secret"
 
   linkedin:
     enabled: false
