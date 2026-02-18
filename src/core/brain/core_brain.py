@@ -135,3 +135,128 @@ class CoreBrain:
             snapshot = json.load(f)
 
         logger.info(f"Imported coreBrain snapshot from {snapshot.get('export_timestamp')}")
+
+    # ============================================================
+    # BUILD CONVERSATION METHODS
+    # These store build-related conversations (how to implement X,
+    # architectural discussions, etc.) - semantically different
+    # from DigitalCloneBrain's user conversations
+    # ============================================================
+
+    async def store_conversation_turn(
+        self,
+        user_message: str,
+        assistant_response: str,
+        model_used: str,
+        metadata: Dict[str, Any] = None
+    ):
+        """Store a build conversation turn.
+
+        Build conversations are about system architecture, implementation
+        strategies, and development discussions.
+
+        Args:
+            user_message: Developer's question/request
+            assistant_response: Assistant's response
+            model_used: Which model generated the response
+            metadata: Additional metadata
+        """
+        conversation_text = f"""Build Discussion:
+Developer: {user_message}
+Assistant ({model_used}): {assistant_response}"""
+
+        await self.db.store(
+            text=conversation_text,
+            metadata={
+                "type": "build_conversation",
+                "model_used": model_used,
+                "timestamp": datetime.now().isoformat(),
+                "user_message": user_message,
+                "assistant_response": assistant_response,
+                **(metadata or {})
+            }
+        )
+
+        logger.debug(f"Stored build conversation turn (model: {model_used})")
+
+    async def get_recent_conversation(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve recent build conversation turns.
+
+        Args:
+            limit: Number of recent turns to retrieve
+
+        Returns:
+            List of conversation turn dicts
+        """
+        # Search for recent build conversations
+        results = await self.db.search(
+            query="recent build conversation",
+            n_results=limit * 2
+        )
+
+        # Filter for build_conversation type and sort by timestamp
+        conversations = [
+            {
+                "user_message": r["metadata"].get("user_message", ""),
+                "assistant_response": r["metadata"].get("assistant_response", ""),
+                "model_used": r["metadata"].get("model_used", "unknown"),
+                "timestamp": r["metadata"].get("timestamp", "")
+            }
+            for r in results
+            if r["metadata"].get("type") == "build_conversation"
+        ]
+
+        # Sort by timestamp (most recent first)
+        conversations.sort(
+            key=lambda x: x["timestamp"],
+            reverse=True
+        )
+
+        return conversations[:limit]
+
+    async def get_conversation_context(self, current_message: str, limit: int = 3) -> str:
+        """Get formatted build conversation context.
+
+        Args:
+            current_message: Current developer message
+            limit: Number of previous turns to include
+
+        Returns:
+            Formatted context string
+        """
+        recent = await self.get_recent_conversation(limit)
+
+        if not recent:
+            return ""
+
+        context_parts = ["## Recent Build Discussions:"]
+        for turn in reversed(recent):  # Chronological order
+            context_parts.append(f"Developer: {turn['user_message']}")
+            context_parts.append(f"Assistant: {turn['assistant_response']}")
+            context_parts.append("")
+
+        return "\n".join(context_parts)
+
+    async def get_relevant_context(self, query: str, max_results: int = 3) -> str:
+        """Get relevant build context for current query.
+
+        Args:
+            query: Current query
+            max_results: Maximum number of relevant items
+
+        Returns:
+            Formatted context string
+        """
+        results = await self.db.search(
+            query=query,
+            n_results=max_results
+        )
+
+        if not results:
+            return ""
+
+        context_parts = ["## Relevant Build Knowledge:"]
+        for r in results:
+            context_parts.append(f"- {r['text'][:200]}")
+
+        return "\n".join(context_parts)

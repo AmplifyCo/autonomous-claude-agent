@@ -148,7 +148,7 @@ class ConversationManager:
             response = await self._process_with_fallback(message)
 
             # Store conversation turn in Brain for context continuity
-            # (Only DigitalCloneBrain has conversation methods, CoreBrain does not)
+            # (Both CoreBrain and DigitalCloneBrain have conversation methods)
             if self.brain and hasattr(self.brain, 'store_conversation_turn'):
                 await self.brain.store_conversation_turn(
                     user_message=message,
@@ -288,7 +288,7 @@ class ConversationManager:
                 return f"{warning}\n\n❌ Local model not available."
 
             # RETRIEVE CONTEXT FROM BRAIN
-            # (Only DigitalCloneBrain has conversation methods)
+            # (Both CoreBrain and DigitalCloneBrain have conversation methods)
             messages = []
             conversation_context = ""
 
@@ -331,7 +331,7 @@ Capabilities:
 
             response_text = local_response["content"][0]["text"]
 
-            # Queue for Claude review (only DigitalCloneBrain has this)
+            # Queue for Claude review (both brains support this)
             if self.brain and hasattr(self.brain, 'queue_for_claude_review'):
                 await self.brain.queue_for_claude_review(
                     message=message,
