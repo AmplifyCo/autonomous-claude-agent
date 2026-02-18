@@ -1,7 +1,7 @@
 """Type definitions for the autonomous agent system."""
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, Union
 from enum import Enum
 
 
@@ -142,4 +142,4 @@ class SubAgentResult:
 class Message:
     """Chat message for API calls."""
     role: Literal["user", "assistant"]
-    content: str | List[Dict[str, Any]]
+    content: Union[str, List[Dict[str, Any]]]
