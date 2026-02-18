@@ -57,7 +57,10 @@ class AnthropicClient:
                 )
             )
 
-            logger.info(f"Claude API call successful. Stop reason: {response.stop_reason}")
+            # Log token usage
+            usage = response.usage
+            logger.info(f"API call: {usage.input_tokens} in / {usage.output_tokens} out")
+
             return response
 
         except anthropic.APIError as e:
