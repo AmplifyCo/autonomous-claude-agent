@@ -34,6 +34,7 @@ manager.switch_brain_mode("assistant")  # Switch to DigitalCloneBrain
 ```
 """
 
+import asyncio
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -154,6 +155,13 @@ class ConversationManager:
             # Store callback for use by other methods
             self._progress_callback = progress_callback
 
+            # Start periodic updates if callback provided (channel-agnostic)
+            update_task = None
+            if progress_callback:
+                update_task = asyncio.create_task(
+                    self._send_periodic_updates(message, progress_callback)
+                )
+
             # ========================================================================
             # LAYER 12: RATE LIMITING
             # ========================================================================
@@ -191,6 +199,14 @@ class ConversationManager:
             # Try primary processing with Claude API
             response = await self._process_with_fallback(message)
 
+            # Cancel periodic updates (processing complete)
+            if update_task:
+                update_task.cancel()
+                try:
+                    await update_task
+                except asyncio.CancelledError:
+                    pass
+
             # ========================================================================
             # LAYER 10: OUTPUT FILTERING (Redact Secrets)
             # ========================================================================
@@ -214,6 +230,15 @@ class ConversationManager:
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
+
+            # Cancel periodic updates on error
+            if update_task:
+                update_task.cancel()
+                try:
+                    await update_task
+                except asyncio.CancelledError:
+                    pass
+
             return f"❌ Error: {str(e)}"
 
     async def _process_with_fallback(self, message: str) -> str:
@@ -783,3 +808,89 @@ USER INPUT BEGINS BELOW:
         except Exception as e:
             logger.error(f"Status check failed: {e}", exc_info=True)
             return f"❌ Status check failed: {str(e)}"
+
+    # ========================================================================
+    # Periodic Updates (Channel-Agnostic)
+    # ========================================================================
+
+    async def _send_periodic_updates(self, message: str, progress_callback):
+        """Send periodic conversational updates while processing (channel-agnostic).
+
+        This runs in the background and sends status updates to the user
+        via the progress_callback. The callback is channel-specific
+        (Telegram edits message, email might not support it, etc.)
+
+        Args:
+            message: User message (for context-specific updates)
+            progress_callback: Async function to call with status updates
+        """
+        msg_lower = message.lower()
+
+        # Initial updates (always shown)
+        initial_updates = [
+            "💭 Thinking...",
+            "🧠 Checking my memory...",
+            "📚 Looking into this..."
+        ]
+
+        # Context-specific ongoing updates (loop these for long operations)
+        ongoing_updates = []
+
+        if any(word in msg_lower for word in ["git", "pull", "update from git"]):
+            ongoing_updates = [
+                "🔍 Checking git repository...",
+                "📥 Fetching latest changes...",
+                "🔄 Pulling updates...",
+                "📦 Checking dependencies...",
+                "⚙️ Processing updates..."
+            ]
+        elif any(word in msg_lower for word in ["build", "implement", "create", "feature"]):
+            ongoing_updates = [
+                "🔨 Planning the implementation...",
+                "📝 Analyzing requirements...",
+                "🏗️ Designing architecture...",
+                "💻 Preparing to write code..."
+            ]
+        elif any(word in msg_lower for word in ["install", "package", "dependency"]):
+            ongoing_updates = [
+                "📦 Checking package manager...",
+                "🔍 Resolving dependencies...",
+                "⬇️ Downloading packages...",
+                "⚙️ Installing..."
+            ]
+        elif any(word in msg_lower for word in ["restart", "reboot"]):
+            ongoing_updates = [
+                "🔄 Preparing to restart...",
+                "💾 Saving state...",
+                "⚙️ Initiating restart..."
+            ]
+        else:
+            # Generic updates for other operations
+            ongoing_updates = [
+                "⚙️ Working on it...",
+                "🔍 Analyzing...",
+                "💭 Processing..."
+            ]
+
+        try:
+            # Show initial updates
+            for i, update in enumerate(initial_updates):
+                if i == 0:
+                    await asyncio.sleep(1)  # Short delay for first update
+                else:
+                    await asyncio.sleep(3)  # 3 seconds between updates
+                await progress_callback(update)
+
+            # Loop ongoing updates until task is cancelled
+            # This ensures continuous feedback for long operations
+            update_index = 0
+            while True:
+                await asyncio.sleep(5)  # 5 seconds between ongoing updates
+                await progress_callback(ongoing_updates[update_index])
+                update_index = (update_index + 1) % len(ongoing_updates)  # Loop through updates
+
+        except asyncio.CancelledError:
+            # Expected when processing completes
+            logger.debug("Periodic updates cancelled (processing complete)")
+        except Exception as e:
+            logger.error(f"Error in periodic updates: {e}")

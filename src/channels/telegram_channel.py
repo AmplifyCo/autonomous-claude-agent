@@ -125,9 +125,9 @@ class TelegramChannel:
                 parse_mode="Markdown"
             )
 
-            # Create progress callback for conversational updates
+            # Create progress callback for Telegram message editing
             async def update_progress(status: str):
-                """Update status message with conversational text."""
+                """Update status message with conversational text (Telegram-specific rendering)."""
                 if status_message:
                     try:
                         await self.bot.edit_message_text(
@@ -139,21 +139,14 @@ class TelegramChannel:
                     except Exception as e:
                         logger.debug(f"Status update skipped: {e}")
 
-            # Start a background task for periodic updates
-            update_task = asyncio.create_task(
-                self._periodic_updates(update_progress, message)
-            )
-
             # CORE INTELLIGENCE HERE (channel-agnostic)
+            # ConversationManager handles periodic updates internally for ALL operations
             response = await self.conversation_manager.process_message(
                 message=message,
                 channel="telegram",
                 user_id=user_id,
-                progress_callback=update_progress
+                progress_callback=update_progress  # Telegram-specific callback
             )
-
-            # Cancel update task
-            update_task.cancel()
 
             # Delete status message
             try:
@@ -179,81 +172,6 @@ class TelegramChannel:
                 except:
                     pass
             await self.send_message(f"❌ Error: {str(e)}")
-
-    async def _periodic_updates(self, update_callback, user_message: str):
-        """Send periodic conversational updates while processing.
-
-        Args:
-            update_callback: Function to call with status updates
-            user_message: Original user message
-        """
-        msg_lower = user_message.lower()
-
-        # Initial updates (always shown)
-        initial_updates = [
-            "💭 Thinking...",
-            "🧠 Checking my memory...",
-            "📚 Looking into this..."
-        ]
-
-        # Context-specific updates (loop these for long operations)
-        ongoing_updates = []
-
-        if any(word in msg_lower for word in ["git", "pull", "update from git"]):
-            ongoing_updates = [
-                "🔍 Checking git repository...",
-                "📥 Fetching latest changes...",
-                "🔄 Pulling updates...",
-                "📦 Checking dependencies...",
-                "⚙️ Processing updates..."
-            ]
-        elif any(word in msg_lower for word in ["build", "implement", "create", "feature"]):
-            ongoing_updates = [
-                "🔨 Planning the implementation...",
-                "📝 Analyzing requirements...",
-                "🏗️ Designing architecture...",
-                "💻 Preparing to write code..."
-            ]
-        elif any(word in msg_lower for word in ["install", "package", "dependency"]):
-            ongoing_updates = [
-                "📦 Checking package manager...",
-                "🔍 Resolving dependencies...",
-                "⬇️ Downloading packages...",
-                "⚙️ Installing..."
-            ]
-        elif any(word in msg_lower for word in ["restart", "reboot"]):
-            ongoing_updates = [
-                "🔄 Preparing to restart...",
-                "💾 Saving state...",
-                "⚙️ Initiating restart..."
-            ]
-        else:
-            # Generic updates for other operations
-            ongoing_updates = [
-                "⚙️ Working on it...",
-                "🔍 Analyzing...",
-                "💭 Processing..."
-            ]
-
-        try:
-            # Show initial updates
-            for i, update in enumerate(initial_updates):
-                if i == 0:
-                    await asyncio.sleep(1)  # Short delay for first update
-                else:
-                    await asyncio.sleep(3)  # 3 seconds between updates
-                await update_callback(update)
-
-            # Loop ongoing updates until task is cancelled
-            # This ensures continuous feedback for long operations
-            update_index = 0
-            while True:
-                await asyncio.sleep(5)  # 5 seconds between ongoing updates
-                await update_callback(ongoing_updates[update_index])
-                update_index = (update_index + 1) % len(ongoing_updates)  # Loop through updates
-
-        except asyncio.CancelledError:
-            pass  # Expected when processing completes
 
     async def send_message(self, text: str):
         """Send message to Telegram.
