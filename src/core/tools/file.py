@@ -3,8 +3,9 @@
 import aiofiles
 import logging
 import os
+import yaml
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from .base import BaseTool
 from ..types import ToolResult
 
@@ -32,6 +33,13 @@ class FileTool(BaseTool):
         }
     }
 
+    # Layer 14: Self-Protection - Hardcoded critical files
+    # These are ALWAYS protected, even if config fails to load
+    CRITICAL_PROTECTED_FILES = [
+        "config/security.yaml",  # This config itself (prevent circular dependency)
+        ".env",  # Environment variables with secrets
+    ]
+
     def __init__(self, max_file_size_mb: int = 10):
         """Initialize FileTool.
 
@@ -39,6 +47,76 @@ class FileTool(BaseTool):
             max_file_size_mb: Maximum file size to read/write in MB
         """
         self.max_file_size = max_file_size_mb * 1024 * 1024
+        self.protected_files: List[str] = []
+        self.protected_directories: List[str] = []
+
+        # Load protected files from config (Layer 14: Self-Protection)
+        self._load_protected_files()
+
+    def _load_protected_files(self):
+        """Load protected files list from security config (Layer 14: Self-Protection)."""
+        try:
+            security_config_path = Path("config/security.yaml")
+
+            if security_config_path.exists():
+                with open(security_config_path, 'r') as f:
+                    security_config = yaml.safe_load(f) or {}
+
+                self.protected_files = security_config.get("protected_files", [])
+                self.protected_directories = security_config.get("protected_directories", [])
+
+                logger.info(
+                    f"🔒 Layer 14: Self-Protection enabled - "
+                    f"{len(self.protected_files)} files, "
+                    f"{len(self.protected_directories)} directories protected"
+                )
+            else:
+                logger.warning("config/security.yaml not found - using minimal protection")
+                self.protected_files = []
+                self.protected_directories = []
+
+        except Exception as e:
+            logger.error(f"Failed to load security config: {e} - using minimal protection")
+            self.protected_files = []
+            self.protected_directories = []
+
+    def _is_protected_file(self, path: str) -> bool:
+        """Check if file is protected from modifications (Layer 14: Self-Protection).
+
+        Args:
+            path: File path to check
+
+        Returns:
+            True if file is protected
+        """
+        try:
+            path_normalized = str(Path(path).resolve())
+        except Exception:
+            # If path resolution fails, treat as potentially dangerous
+            path_normalized = path
+
+        # Check hardcoded critical files (always protected)
+        for critical in self.CRITICAL_PROTECTED_FILES:
+            if critical in path or critical in path_normalized:
+                return True
+
+        # Check config-loaded protected files
+        for protected in self.protected_files:
+            try:
+                protected_normalized = str(Path(protected).resolve())
+                if protected_normalized in path_normalized or path_normalized.endswith(protected):
+                    return True
+            except Exception:
+                # If resolution fails, do string matching
+                if protected in path or protected in path_normalized:
+                    return True
+
+        # Check protected directories
+        for protected_dir in self.protected_directories:
+            if protected_dir in path or protected_dir in path_normalized:
+                return True
+
+        return False
 
     async def execute(
         self,
@@ -57,6 +135,16 @@ class FileTool(BaseTool):
             ToolResult with operation result
         """
         try:
+            # Layer 14: Self-Protection - Block writes to protected files
+            if operation in ["write", "edit"] and self._is_protected_file(path):
+                logger.warning(f"🚨 BLOCKED: Attempt to modify protected file: {path}")
+                return ToolResult(
+                    success=False,
+                    error=f"⛔ Security: Cannot modify protected file: {path}\n"
+                          f"Protected files: security config, audit logs, .env\n"
+                          f"This is Layer 14: Self-Protection - prevents tampering with security."
+                )
+
             if operation == "read":
                 return await self._read_file(path)
             elif operation == "write":

@@ -82,6 +82,17 @@ agent:
       # Cron/scheduled tasks (could persist malicious code)
       - crontab -e
       - sudo crontab
+      # LAYER 14: Self-Protection - Block modifications to security files
+      - src/core/security/llm_security.py
+      - src/core/security/audit_logger.py
+      - src/core/security/
+      - config/agent.yaml
+      - logs/security_audit.jsonl
+      - vim src/core/security
+      - nano src/core/security
+      - rm src/core/security
+      - rm config/agent.yaml
+      - rm logs/security_audit.jsonl
 
   # LAYER 11: SEMANTIC VALIDATION
   # Validates that tool use makes semantic sense given user's message

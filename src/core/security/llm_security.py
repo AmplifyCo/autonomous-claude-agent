@@ -61,6 +61,19 @@ class LLMSecurityGuard:
         r"remove\s+(all\s+)?restrictions",
         r"bypass\s+(all\s+)?filters",
 
+        # Layer 14: Self-Protection - Prevent modifying security config
+        r"disable\s+(security|rate\s+limit|audit|logging|protection)",
+        r"turn\s+off\s+(security|rate\s+limit|audit|logging|protection)",
+        r"remove\s+(security|rate\s+limit|audit|logging)",
+        r"modify\s+(security|blocked|allowed)\s+(config|commands|rules)",
+        r"change\s+(security|blocked|allowed)\s+(config|commands|rules)",
+        r"edit\s+(llm_security|audit_logger|agent\.yaml)",
+        r"update\s+(security|config)\s+(file|rules)",
+        r"increase\s+rate\s+limit",
+        r"raise\s+rate\s+limit",
+        r"bypass\s+security",
+        r"circumvent\s+security",
+
         # Encoding tricks
         r"base64\s+decode",
         r"rot13\s+decode",

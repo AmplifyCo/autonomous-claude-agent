@@ -1,0 +1,44 @@
+# Security Configuration
+# Layer 14: Self-Protection
+#
+# This file defines protected resources that cannot be modified by the agent.
+# The agent can READ this file but CANNOT write/edit it.
+#
+# ⚠️ CRITICAL: Do not add this file to protected_files (would create circular dependency)
+# Instead, this file is hardcoded as protected in FileTool
+
+protected_files:
+  # Security module files (Layer 8-13 implementation)
+  - src/core/security/llm_security.py
+  - src/core/security/audit_logger.py
+  - src/core/security/__init__.py
+
+  # Configuration files
+  - config/agent.yaml
+  - config/security.yaml  # This file itself
+  - .env
+  - .env.local
+
+  # Audit and logs
+  - logs/security_audit.jsonl
+
+  # Critical system files
+  - src/core/conversation_manager.py  # Contains security integration
+  - src/core/tools/registry.py  # Contains tool execution logic
+
+  # Directories (any file under these paths is protected)
+  - src/core/security/
+
+protected_directories:
+  - src/core/security
+  - logs
+
+# Reason for each protection:
+# - llm_security.py: Contains prompt injection detection, rate limiting
+# - audit_logger.py: Contains security event logging
+# - agent.yaml: Contains blocked commands, rate limits, security config
+# - security.yaml: This file - list of protected resources
+# - .env: Contains API keys, secrets
+# - security_audit.jsonl: Immutable audit trail
+# - conversation_manager.py: Contains security integration points
+# - tools/registry.py: Contains tool execution and validation logic
