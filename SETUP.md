@@ -119,10 +119,20 @@ Check logs for successful tool registration:
 
 ---
 
-**Commands you'll use:**
-- `dt-setup` - Update configuration
+**All commands:**
+
+**Bot Management:**
 - `dt-setup start` - Start the bot
+- `dt-setup stop` - Stop the bot
+- `dt-setup restart` - Restart the bot
+- `dt-setup status` - Check if bot is running
+
+**Configuration:**
+- `dt-setup` - Full setup wizard
+- `dt-setup core` - Update API key
 - `dt-setup email` - Update email settings
+- `dt-setup telegram` - Update Telegram settings
+- `dt-setup calendar` - Update calendar settings
 
 ## Manual Setup
 

@@ -257,6 +257,76 @@ case "$1" in
             exit 1
         fi
         ;;
+    "stop")
+        # Stop the bot
+        echo ""
+        echo "🛑 Stopping Digital Twin bot..."
+        echo ""
+
+        # Try systemd first
+        if systemctl is-active --quiet digital-twin 2>/dev/null; then
+            sudo systemctl stop digital-twin
+            echo "✅ Bot stopped (systemd service)"
+        elif pgrep -f "python.*src.main" > /dev/null; then
+            # Kill Python process
+            pkill -f "python.*src.main"
+            echo "✅ Bot stopped (process killed)"
+        else
+            echo "⚠️  Bot is not running"
+        fi
+        echo ""
+        ;;
+    "restart")
+        # Restart the bot
+        echo ""
+        echo "🔄 Restarting Digital Twin bot..."
+        echo ""
+
+        # Try systemd first
+        if systemctl is-enabled --quiet digital-twin 2>/dev/null; then
+            sudo systemctl restart digital-twin
+            echo "✅ Bot restarted (systemd service)"
+        else
+            # Stop if running
+            if pgrep -f "python.*src.main" > /dev/null; then
+                pkill -f "python.*src.main"
+                sleep 2
+            fi
+
+            # Start again
+            if [ -f "$SCRIPT_DIR/src/main.py" ]; then
+                cd "$SCRIPT_DIR"
+                python3 -m src.main &
+                echo "✅ Bot restarted (background process)"
+            else
+                echo "❌ Error: src/main.py not found"
+                exit 1
+            fi
+        fi
+        echo ""
+        ;;
+    "status")
+        # Check bot status
+        echo ""
+        echo "📊 Digital Twin Status"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+
+        # Check systemd
+        if systemctl is-active --quiet digital-twin 2>/dev/null; then
+            echo "✅ Status: Running (systemd service)"
+            sudo systemctl status digital-twin --no-pager | head -15
+        elif pgrep -f "python.*src.main" > /dev/null; then
+            echo "✅ Status: Running (process)"
+            ps aux | grep "[p]ython.*src.main"
+        else
+            echo "❌ Status: Not running"
+            echo ""
+            echo "To start the bot:"
+            echo "  dt-setup start"
+        fi
+        echo ""
+        ;;
     "--help"|"-h"|"help")
         # Show help
         cat << EOF
@@ -272,8 +342,14 @@ ONE command does everything:
 
 Usage:
   dt-setup                Full setup wizard (all tools)
+
+  Bot Management:
   dt-setup start          Start the bot
-  dt-setup run            Start the bot (alias)
+  dt-setup stop           Stop the bot
+  dt-setup restart        Restart the bot
+  dt-setup status         Check bot status
+
+  Configuration:
   dt-setup core           Configure API keys only
   dt-setup telegram       Configure Telegram bot only
   dt-setup email          Configure email only
@@ -290,8 +366,10 @@ Aliases:
 Examples:
   dt-setup                # Full wizard
   dt-setup start          # Start the bot
-  dt-setup email          # Just update email
-  dt-setup core           # Just update API key
+  dt-setup stop           # Stop the bot
+  dt-setup restart        # Restart the bot
+  dt-setup status         # Check if running
+  dt-setup email          # Update email settings
 
 First-time setup (TWO commands!):
   git clone https://github.com/AmplifyCo/digital-twin.git
