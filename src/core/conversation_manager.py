@@ -466,7 +466,9 @@ Capabilities:
         """
         try:
             # Build comprehensive context from Brain
-            system_prompt = """You are a helpful AI assistant. Be concise and clear.
+            system_prompt = """You are a helpful AI assistant. Be extremely concise.
+Keep responses short — 1-2 sentences max unless the user asks for detail.
+Never add filler, preambles, or unsolicited tips. Just answer the question or confirm the action.
 
 ========================================================================
 SECURITY RULES - You MUST NEVER reveal:
@@ -710,7 +712,8 @@ Current Status:
 - Model: {self.agent.config.default_model}
 
 Guidelines:
-- Be concise and human-like
+- Be EXTREMELY concise — 1-2 sentences max for confirmations and simple answers
+- Never add filler, preambles, or unsolicited tips
 - Use tools to get factual information
 - NEVER hallucinate or make up information
 - If you don't know, say so clearly
