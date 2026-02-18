@@ -11,13 +11,7 @@ Quick start guide for setting up your Digital Twin bot with email and calendar i
 
 ## Quick Setup (EC2 or Local)
 
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Install dt-setup Command (One-Time)
+### 1. Install dt-setup Command (One-Time)
 
 **Using make (recommended):**
 ```bash
@@ -31,22 +25,29 @@ sudo ./install.sh
 
 This installs `dt-setup` to `/usr/local/bin` so you can run it like `python`, `git`, `npm` - from anywhere, no `./` needed.
 
-### 3. Run Configuration Wizard
+### 2. Run Setup Wizard
 
 ```bash
-dt-setup              # Full interactive wizard
+dt-setup              # ONE command does everything!
+```
+
+**What dt-setup does automatically:**
+1. ✅ Checks if dependencies are installed
+2. ✅ Runs `pip install -r requirements.txt` if needed
+3. ✅ Launches interactive configuration wizard
+4. ✅ Auto-detects email providers (Gmail, Outlook, etc.)
+5. ✅ Auto-populates IMAP/SMTP/CalDAV settings
+6. ✅ Updates `.env` file with your credentials
+
+**Specific configuration:**
+```bash
 dt-setup email        # Configure email only
 dt-setup telegram     # Configure Telegram only
 dt-setup core         # Configure API keys only
+dt-setup calendar     # Configure calendar only
 ```
 
-The interactive wizard will:
-- Auto-detect your email provider (Gmail, Outlook, etc.)
-- Auto-populate IMAP/SMTP/CalDAV settings
-- Prompt for your credentials
-- Update your `.env` file automatically
-
-### 4. Start the Bot
+### 3. Start the Bot
 
 ```bash
 python -m src.main

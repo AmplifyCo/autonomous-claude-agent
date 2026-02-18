@@ -1,6 +1,6 @@
 #!/bin/bash
 # Digital Twin Configuration Command
-# Simple wrapper for configure.py with friendly syntax
+# Handles full setup: dependencies + configuration
 #
 # Usage:
 #   dt-setup                # Full setup wizard
@@ -13,11 +13,53 @@
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIGURE_PY="$SCRIPT_DIR/configure.py"
+REQUIREMENTS_TXT="$SCRIPT_DIR/requirements.txt"
 
 # Check if configure.py exists
 if [ ! -f "$CONFIGURE_PY" ]; then
     echo "Error: configure.py not found at $CONFIGURE_PY"
     exit 1
+fi
+
+# ============================================
+# Auto-install dependencies if needed
+# ============================================
+check_and_install_dependencies() {
+    # Check if anthropic package is installed (key dependency)
+    if ! python3 -c "import anthropic" 2>/dev/null; then
+        echo ""
+        echo "📦 Dependencies not found. Installing required packages..."
+        echo ""
+
+        # Check if requirements.txt exists
+        if [ ! -f "$REQUIREMENTS_TXT" ]; then
+            echo "⚠️  Warning: requirements.txt not found at $REQUIREMENTS_TXT"
+            echo "   Skipping dependency installation."
+            echo ""
+            return
+        fi
+
+        # Install dependencies
+        echo "Running: pip install -r requirements.txt"
+        echo ""
+
+        if python3 -m pip install -r "$REQUIREMENTS_TXT"; then
+            echo ""
+            echo "✅ Dependencies installed successfully!"
+            echo ""
+        else
+            echo ""
+            echo "❌ Failed to install dependencies."
+            echo "   Please run manually: pip install -r requirements.txt"
+            echo ""
+            exit 1
+        fi
+    fi
+}
+
+# Check dependencies before running configuration (unless --help)
+if [[ "$1" != "--help" && "$1" != "-h" && "$1" != "help" ]]; then
+    check_and_install_dependencies
 fi
 
 # Parse arguments and map to configure.py flags
@@ -51,6 +93,12 @@ case "$1" in
         cat << EOF
 Digital Twin Setup Tool
 
+ONE command for complete setup:
+  • Checks and installs dependencies (pip packages)
+  • Runs interactive configuration wizard
+  • Auto-detects email providers
+  • Updates .env file
+
 Usage:
   dt-setup                Full setup wizard (all tools)
   dt-setup digital-twin   Full setup (alias)
@@ -67,9 +115,15 @@ Aliases:
   calendar, cal           → Calendar configuration
 
 Examples:
-  dt-setup                # Interactive wizard for all tools
+  dt-setup                # Full wizard (auto-installs deps if needed)
   dt-setup email          # Just configure email
   dt-setup core           # Just update API keys
+
+First-time setup:
+  git clone <repo>
+  cd digital-twin
+  make install            # Install dt-setup globally (one-time)
+  dt-setup                # Installs deps + configures everything!
 
 For advanced options, use:
   python3 configure.py --help
