@@ -45,8 +45,14 @@ agent:
       # Destructive file operations
       - rm -rf /
       - rm -rf /*
+      - rm -rf ~
       - sudo rm -rf
       - sudo rm
+      - rm -r /
+      # Command injection bypass attempts
+      - bash -c "rm
+      - sh -c "rm
+      - eval rm
       # System control
       - sudo shutdown
       - sudo reboot
@@ -64,9 +70,18 @@ agent:
       - sudo killall
       - sudo userdel
       - sudo deluser
+      - sudo passwd
       # Network attacks
       - :(){ :|:& };:  # fork bomb
       - sudo iptables -F  # flush firewall rules
+      # Sensitive file access
+      - cat /etc/shadow
+      - cat /etc/passwd
+      - cat ~/.ssh/id_rsa
+      - cp /etc/shadow
+      # Cron/scheduled tasks (could persist malicious code)
+      - crontab -e
+      - sudo crontab
 
 brain:
   vector_db:
