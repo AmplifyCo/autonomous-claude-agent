@@ -188,7 +188,7 @@ pip install -r requirements.txt
 # Configure limited sudo access
 echo "🔐 Configuring limited sudo access for agent..."
 CURRENT_USER=$(whoami)
-sudo tee /etc/sudoers.d/claude-agent > /dev/null << 'SUDOERS_EOF'
+sudo tee /etc/sudoers.d/digital-twin > /dev/null << 'SUDOERS_EOF'
 # Limited sudo access for autonomous agent
 # Package management
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/yum install *
@@ -200,11 +200,11 @@ ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt install *
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/apt update *
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/pip install *
 
-# Service management (only claude-agent service)
-ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart claude-agent
+# Service management (only digital-twin service)
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart digital-twin
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl status *
-ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop claude-agent
-ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl start claude-agent
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop digital-twin
+ec2-user ALL=(ALL) NOPASSWD: /usr/bin/systemctl start digital-twin
 
 # Firewall management
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd *
@@ -213,12 +213,12 @@ ec2-user ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd *
 ec2-user ALL=(ALL) NOPASSWD: /usr/bin/journalctl *
 SUDOERS_EOF
 
-sudo chmod 440 /etc/sudoers.d/claude-agent
+sudo chmod 440 /etc/sudoers.d/digital-twin
 echo "✅ Limited sudo access configured"
 echo ""
 echo "Agent capabilities:"
 echo "  ✅ Install packages (yum/apt/pip)"
-echo "  ✅ Manage claude-agent service"
+echo "  ✅ Manage digital-twin service"
 echo "  ✅ Configure firewall"
 echo "  ✅ View system logs"
 echo "  ❌ Cannot shutdown/reboot"
@@ -390,7 +390,7 @@ if [[ "$setup_tunnel" =~ ^[Yy]$ ]]; then
     TUNNEL_HOSTNAME="${subdomain}.${user_domain}"
 
     # Create or use existing tunnel
-    TUNNEL_NAME="claude-agent"
+    TUNNEL_NAME="digital-twin"
 
     if cloudflared tunnel list 2>/dev/null | grep -q "$TUNNEL_NAME"; then
         echo "✅ Using existing tunnel: $TUNNEL_NAME"
@@ -510,9 +510,9 @@ CURRENT_USER=$(whoami)
 CURRENT_DIR=$(pwd)
 
 # Create service file with current user and directory
-cat > /tmp/claude-agent.service << EOF
+cat > /tmp/digital-twin.service << EOF
 [Unit]
-Description=Autonomous Claude Agent - Self-Building AI System
+Description=Digital Twin - Self-Building AI System with Dual Brain Architecture
 After=network.target
 
 [Service]
@@ -544,9 +544,9 @@ WantedBy=multi-user.target
 EOF
 
 # Install service
-sudo mv /tmp/claude-agent.service /etc/systemd/system/
+sudo mv /tmp/digital-twin.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable claude-agent
+sudo systemctl enable digital-twin
 
 # Configure automatic system updates
 echo "🔄 Configuring automatic security updates..."
@@ -582,7 +582,7 @@ pip cache purge > /dev/null 2>&1 || true
 
 # Remove any temporary files
 rm -f /tmp/chromedriver.zip 2>/dev/null || true
-rm -f /tmp/claude-agent.service 2>/dev/null || true
+rm -f /tmp/digital-twin.service 2>/dev/null || true
 
 # Clean up downloaded setup script if it exists
 rm -f ~/amazon-linux-setup.sh 2>/dev/null || true
@@ -612,13 +612,13 @@ echo "1. Configure .env file:"
 echo "   nano .env"
 echo ""
 echo "2. Start the agent:"
-echo "   sudo systemctl start claude-agent"
+echo "   sudo systemctl start digital-twin"
 echo ""
 echo "3. Check status:"
-echo "   sudo systemctl status claude-agent"
+echo "   sudo systemctl status digital-twin"
 echo ""
 echo "4. View logs:"
-echo "   sudo journalctl -u claude-agent -f"
+echo "   sudo journalctl -u digital-twin -f"
 echo "   # Or: tail -f data/logs/agent.log"
 echo ""
 echo "5. Access web dashboard:"
