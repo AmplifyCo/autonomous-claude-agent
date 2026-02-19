@@ -921,30 +921,38 @@ RECENT CONVERSATION (use this to understand context):
 {conversation_history}
 ---"""
 
-            intent_prompt = f"""Intent classifier. Understand what user needs, even implicitly.
+            intent_prompt = f"""Intent classifier. Map user message to the right intent and tool.
 {tool_context}{history_context}
 Return EXACTLY: intent|confidence|inferred_task
 
-Intents: action, question, conversation, clarify, build_feature, status, git_update, restart
-Confidence: high, medium, low
-Inferred_task: what to DO, "none" for chat, or clarification question
+Intents:
+- action: needs a tool to execute (email, calendar, bash, file, web, search, post, reminder, etc.)
+- question: answerable from knowledge alone, no tool needed ("what is X?", "how does Y work?")
+- conversation: social/casual ("good morning", "thanks", "call me boss")
+- clarify: genuinely ambiguous even with context
+- build_feature: add/modify the bot's own code
+- status / git_update / restart: system commands
 
-Rules:
-- If request matches a capability in AVAILABLE TOOLS, intent is ALWAYS "action"
-- Use history for context ("yes do it" = execute last discussed action)
-- Action wins when both action+conversation present
-- INTERPRET meaning, don't parrot literal words
-- "clarify" only when genuinely ambiguous
+KEY RULE — question vs action:
+"question" = Claude can answer from its own knowledge, no external data needed
+"action" = requires fetching live data OR using a tool → classify as action even if phrased as a question
 
 Examples:
 "Post on X: AI is the future" → action|high|Post exact: AI is the future
-"Check my email" → action|high|Check inbox (matches email tool)
-"yes" (after bot proposed deleting 3 emails) → action|high|Delete the 3 emails as proposed
-"yes" (after bot proposed scheduling meeting) → action|high|Schedule the meeting as proposed
-"do it" / "go ahead" / "confirm" (after any bot proposal) → action|high|Execute the proposed action
+"Check my email" → action|high|Check inbox for new messages
+"Any unread emails?" → action|high|Check inbox for unread emails
+"Do I have messages?" → action|high|Check inbox for new messages
+"What's in my inbox?" → action|high|Check inbox for new messages
+"Any meetings today?" → action|high|Check calendar for today's events
+"What's on my calendar?" → action|high|Check calendar for upcoming events
+"Remind me to call John at 3pm" → action|high|Set reminder: call John at 3pm
+"Search for flights to NYC" → action|high|Search flights to NYC
+"yes" (after bot proposed deleting emails) → action|high|Delete the emails as proposed
+"do it" / "go ahead" / "confirm" → action|high|Execute the proposed action
 "Good morning!" → conversation|high|none
 "Call me boss" → conversation|high|none
-"What's the weather?" → question|high|none
+"What's the capital of France?" → question|high|none
+"How does photosynthesis work?" → question|high|none
 "Do the thing" (no context) → clarify|low|What would you like me to do?"""
 
             response = await intent_client.create_message(
