@@ -141,20 +141,41 @@ class Dashboard:
                 logger.error(f"Error in Telegram webhook: {e}", exc_info=True)
                 return {"ok": False, "error": str(e)}
 
+        @app.get("/whatsapp/webhook")
+        async def verify_whatsapp_webhook(request: Request):
+            """Handle WhatsApp webhook verification (GET)."""
+            if not hasattr(self, 'whatsapp_chat') or not self.whatsapp_chat:
+                logger.warning("WhatsApp verify called but chat handler not set")
+                return self.JSONResponse(status_code=403, content={"status": "error", "error": "Not configured"})
+
+            try:
+                # Get query params
+                params = dict(request.query_params)
+                challenge = await self.whatsapp_chat.verify_webhook(params)
+                
+                if challenge:
+                    return self.HTMLResponse(content=challenge, status_code=200)
+                else:
+                    return self.JSONResponse(status_code=403, content={"status": "error", "error": "Verification failed"})
+
+            except Exception as e:
+                logger.error(f"Error in WhatsApp verification: {e}", exc_info=True)
+                return self.JSONResponse(status_code=500, content={"status": "error", "error": str(e)})
+
         @app.post("/whatsapp/webhook")
         async def whatsapp_webhook(request: Request):
-            """Handle WhatsApp webhook."""
+            """Handle WhatsApp webhook (POST)."""
             if not hasattr(self, 'whatsapp_chat') or not self.whatsapp_chat:
                 logger.warning("WhatsApp webhook called but chat handler not set")
                 return {"status": "error", "error": "Chat handler not configured"}
 
             try:
-                # Get form data (Twilio sends form-encoded)
-                form_data = await request.form()
-                logger.debug(f"Received WhatsApp webhook: {form_data}")
+                # Get JSON payload (Meta sends JSON)
+                payload = await request.json()
+                logger.debug(f"Received WhatsApp webhook: {payload}")
 
                 # Handle with WhatsAppChannel
-                result = await self.whatsapp_chat.handle_webhook(dict(form_data))
+                result = await self.whatsapp_chat.handle_webhook_payload(payload)
                 return result
 
             except Exception as e:

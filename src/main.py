@@ -164,16 +164,15 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         agent.digital_brain = digital_brain   # Conversation memories, preferences, contacts
         agent.core_brain = core_brain         # Intelligence principles, build knowledge, patterns
 
-        # Register WhatsAppTool (outbound)
-        if config.twilio_account_sid and config.twilio_auth_token:
+        # Register WhatsAppTool (outbound) - Meta Cloud API
+        if config.whatsapp_api_token and config.whatsapp_phone_id:
             from src.core.tools.whatsapp import WhatsAppTool
             whatsapp_tool = WhatsAppTool(
-                account_sid=config.twilio_account_sid,
-                auth_token=config.twilio_auth_token,
-                from_number=config.twilio_from_number
+                api_token=config.whatsapp_api_token,
+                phone_id=config.whatsapp_phone_id
             )
             agent.tools.register_tool(whatsapp_tool)
-            logger.info("📱 WhatsAppTool registered")
+            logger.info("📱 WhatsAppTool registered (Meta Cloud API)")
 
         # Initialize sub-agent spawner
         api_client = AnthropicClient(config.api_key)
@@ -295,11 +294,11 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 webhook_url=webhook_url
             )
 
-            # Initialize WhatsAppChannel (inbound)
+            # Initialize WhatsAppChannel (inbound) - Meta Cloud API
             whatsapp_chat = WhatsAppChannel(
-                account_sid=config.twilio_account_sid,
-                auth_token=config.twilio_auth_token,
-                from_number=config.twilio_from_number,
+                api_token=config.whatsapp_api_token,
+                phone_id=config.whatsapp_phone_id,
+                verify_token=config.whatsapp_verify_token,
                 conversation_manager=conversation_manager
             )
 

@@ -77,10 +77,10 @@ class AgentConfig:
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     
-    # Twilio (WhatsApp)
-    twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None
-    twilio_from_number: Optional[str] = None
+    # WhatsApp (Meta Cloud API)
+    whatsapp_api_token: Optional[str] = None
+    whatsapp_phone_id: Optional[str] = None
+    whatsapp_verify_token: Optional[str] = None
 
     dashboard_enabled: bool = True
     dashboard_host: str = "0.0.0.0"

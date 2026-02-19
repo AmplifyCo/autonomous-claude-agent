@@ -77,10 +77,10 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
 
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID"),
         
-        # Twilio (WhatsApp)
-        twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
-        twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN"),
-        twilio_from_number=os.getenv("TWILIO_FROM_NUMBER"),
+        # WhatsApp (Meta Cloud API)
+        whatsapp_api_token=os.getenv("WHATSAPP_API_TOKEN"),
+        whatsapp_phone_id=os.getenv("WHATSAPP_PHONE_ID"), 
+        whatsapp_verify_token=os.getenv("WHATSAPP_VERIFY_TOKEN"),
 
         dashboard_enabled=yaml_config.get("monitoring", {}).get("dashboard", {}).get("enabled", True),
         dashboard_host=os.getenv("DASHBOARD_HOST", yaml_config.get("monitoring", {}).get("dashboard", {}).get("host", "0.0.0.0")),

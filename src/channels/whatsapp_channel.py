@@ -1,95 +1,118 @@
-"""WhatsApp channel adapter using Twilio.
+"""WhatsApp channel adapter using Meta Cloud API.
 
 This adapter handles:
-1. Receiving inbound messages via Twilio webhook
-2. Passing them to ConversationManager
-3. Sending responses back via Twilio API
+1. Webhook Verification (GET)
+2. Receiving inbound messages via Meta Webhook (POST)
+3. Passing them to ConversationManager
+4. Sending responses back via Meta Graph API
 """
 
 import logging
 import asyncio
+import aiohttp
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppChannel:
-    """WhatsApp channel adapter using Twilio."""
+    """WhatsApp channel adapter using Meta Cloud API."""
 
     def __init__(
         self,
-        account_sid: str,
-        auth_token: str,
-        from_number: str,
+        api_token: str,
+        phone_id: str,
+        verify_token: str,
         conversation_manager,
         allowed_numbers: Optional[list] = None
     ):
         """Initialize WhatsApp channel.
 
         Args:
-            account_sid: Twilio Account SID
-            auth_token: Twilio Auth Token
-            from_number: Twilio WhatsApp number (e.g. "whatsapp:+14155238886")
+            api_token: Meta System User Access Token
+            phone_id: WhatsApp Phone Number ID
+            verify_token: Webhook verification token
             conversation_manager: ConversationManager instance
             allowed_numbers: List of allowed phone numbers (whitelist)
         """
-        self.account_sid = account_sid
-        self.auth_token = auth_token
-        self.from_number = from_number
+        self.api_token = api_token
+        self.phone_id = phone_id
+        self.verify_token = verify_token
         self.conversation_manager = conversation_manager
         self.allowed_numbers = allowed_numbers or []
         
-        self.client = None
-        self.enabled = bool(account_sid and auth_token and from_number)
+        self.api_url = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
+        self.enabled = bool(api_token and phone_id and verify_token)
 
         if self.enabled:
-            try:
-                from twilio.rest import Client
-                self.client = Client(account_sid, auth_token)
-                logger.info("✅ WhatsApp channel initialized (Twilio)")
-            except ImportError:
-                logger.warning("twilio library not installed")
-                self.enabled = False
-            except Exception as e:
-                logger.error(f"Failed to initialize Twilio client: {e}")
-                self.enabled = False
+            logger.info("✅ WhatsApp channel initialized (Meta Cloud API)")
         else:
             logger.info("WhatsApp channel disabled (missing credentials)")
 
-    async def handle_webhook(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle incoming webhook from Twilio.
-
-        Twilio sends data as form-encoded, but we might receive it parsed 
-        depending on how FastAPI handles Request.form().
+    async def verify_webhook(self, params: Dict[str, str]) -> Optional[str]:
+        """Handle Webhook Verification (GET).
         
         Args:
-            form_data: Parsed form data from Twilio
+            params: Query parameters (hub.mode, hub.verify_token, hub.challenge)
             
         Returns:
-            Response dict (for TwiML or empty)
+            Challenge string if verified, None otherwise.
+        """
+        mode = params.get("hub.mode")
+        token = params.get("hub.verify_token")
+        challenge = params.get("hub.challenge")
+
+        if mode and token:
+            if mode == "subscribe" and token == self.verify_token:
+                logger.info("✅ Webhook verified successfully")
+                return challenge
+            else:
+                logger.warning("🚫 Webhook verification failed (token mismatch)")
+                return None
+        return None
+
+    async def handle_webhook_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle incoming webhook payload (POST).
+        
+        Args:
+            payload: JSON payload from Meta
+            
+        Returns:
+            Response dict
         """
         if not self.enabled:
             return {"status": "disabled"}
 
         try:
-            # Extract basic info
-            # Twilio format: Body, From (whatsapp:+1234567890), To
-            body = form_data.get("Body", "")
-            from_number = form_data.get("From", "")
+            # Parse Meta Webhook Structure
+            entry = payload.get("entry", [])
+            if not entry:
+                return {"status": "ignored", "reason": "no_entry"}
+                
+            changes = entry[0].get("changes", [])
+            if not changes:
+                return {"status": "ignored", "reason": "no_changes"}
+                
+            value = changes[0].get("value", {})
+            messages = value.get("messages", [])
             
-            # Simple validation
-            if not body or not from_number:
-                return {"status": "ignored", "reason": "missing_data"}
+            if not messages:
+                # Could be a status update (sent/delivered/read)
+                return {"status": "ignored", "reason": "no_messages"}
+
+            message = messages[0]
+            from_number = message.get("from", "") # e.g. "16505551234"
+            msg_type = message.get("type", "")
+            
+            # Extract text
+            body = ""
+            if msg_type == "text":
+                body = message.get("text", {}).get("body", "")
+            else:
+                body = f"[{msg_type} message]"
 
             # Check whitelist if configured
-            # Note: from_number includes "whatsapp:" prefix
             if self.allowed_numbers:
-                is_allowed = False
-                for allowed in self.allowed_numbers:
-                    if allowed in from_number:
-                        is_allowed = True
-                        break
-                
-                if not is_allowed:
+                if from_number not in self.allowed_numbers:
                     logger.warning(f"🚫 Unauthorized WhatsApp message from {from_number}")
                     return {"status": "ignored", "reason": "unauthorized"}
 
@@ -98,7 +121,6 @@ class WhatsAppChannel:
             # Process asynchronously
             asyncio.create_task(self._process_and_respond(body, from_number))
 
-            # Return empty response to valid webhook (Twilio expects 200 OK)
             return {"status": "received"}
 
         except Exception as e:
@@ -110,20 +132,15 @@ class WhatsAppChannel:
 
         Args:
             message: User message
-            user_id: User ID (phone number with whatsapp: prefix)
+            user_id: User ID (phone number)
         """
         try:
-            # Send "Thinking..." indicator? 
-            # WhatsApp doesn't support "typing" actions nicely via API without session costs,
-            # so we might skip the "Thinking" status message to keep it clean,
-            # or strictly rely on the final response.
-            
             # CORE INTELLIGENCE
+            # Note: We passed the raw phone number as user_id
             response = await self.conversation_manager.process_message(
                 message=message,
                 channel="whatsapp",
                 user_id=user_id,
-                # No periodic updates for WhatsApp to avoid spamming multiple messages
                 enable_periodic_updates=False 
             )
 
@@ -132,30 +149,39 @@ class WhatsAppChannel:
 
         except Exception as e:
             logger.error(f"WhatsApp process error: {e}", exc_info=True)
-            # Try to send error message
             await self.send_message(f"❌ Error: {str(e)}", user_id)
 
     async def send_message(self, text: str, to_number: str):
-        """Send message via Twilio.
+        """Send message via Meta Graph API.
 
         Args:
             text: Message text
-            to_number: Recipient (must include whatsapp: prefix if using Twilio WhatsApp)
+            to_number: Recipient phone number
         """
-        if not self.enabled or not self.client:
-            logger.warning("Attempted to send WhatsApp but channel is disabled")
+        if not self.enabled:
             return
 
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": to_number,
+            "type": "text",
+            "text": {"body": text}
+        }
+
         try:
-            # Run blocking Twilio call in executor
-            await asyncio.to_thread(
-                self.client.messages.create,
-                body=text,
-                from_=self.from_number,
-                to=to_number
-            )
-            # logger.info(f"📤 WhatsApp sent to {to_number}") # Redact log effectively?
-            logger.info(f"📤 WhatsApp sent to {to_number[:12]}...") 
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.api_url, headers=headers, json=data) as resp:
+                    resp_data = await resp.json()
+                    
+                    if resp.status == 200:
+                        logger.info(f"📤 WhatsApp sent to {to_number[:12]}...")
+                    else:
+                        logger.error(f"Failed to send WhatsApp: {resp.status} {resp_data}")
 
         except Exception as e:
-            logger.error(f"Failed to send WhatsApp: {e}")
+            logger.error(f"Failed to send WhatsApp (Network): {e}")
