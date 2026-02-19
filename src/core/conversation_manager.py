@@ -650,39 +650,36 @@ class ConversationManager:
             return clarify_question
 
         elif action == "conversation":
-            # Pure conversation — but check if it needs tools (contacts, lookups)
-            msg_lower = message.lower()
+            msg_lower = message.strip().lower()
 
-            # Keywords that imply tool access is needed even for "conversational" messages
-            needs_tools = (
-                inferred_task or
-                any(kw in msg_lower for kw in [
-                    "contact", "phone", "number", "email", "address",
-                    "find", "look up", "lookup", "do you have", "do you know",
-                    "search", "save", "add", "delete", "remove",
-                    "remind", "schedule", "calendar", "text", "message", "ping",
-                ])
-            )
+            # Only use tool-less _chat() for trivial greetings/acknowledgments
+            trivial_messages = {
+                "hi", "hey", "hello", "yo", "sup",
+                "ok", "okay", "thanks", "thank you", "thx",
+                "bye", "good", "nice", "cool", "great",
+                "yes", "no", "yeah", "nah", "yep", "nope", "sure",
+                "lol", "haha", "hmm",
+                "good morning", "good night", "gm", "gn",
+            }
 
-            if needs_tools:
-                logger.info(f"Conversation needs tools (keywords detected) - using agent")
+            if msg_lower in trivial_messages:
+                logger.info("Trivial greeting - using chat (no tools needed)")
                 self._last_model_used = "claude-sonnet-4-5"
-                model_tier = self._get_model_tier(message)
-                return await self.agent.run(
-                    task=agent_task,
-                    max_iterations=15,
-                    system_prompt=await self._build_system_prompt(message),
-                    model_tier=model_tier
-                )
+                response = await self._chat(message)
+                self._last_bot_response = response
+                await self._learn_from_conversation(message, response)
+                return response
 
-            logger.info("Pure conversation - using chat")
+            # Everything else goes through agent (has tool access)
+            logger.info("Conversation with substance - using agent with tools")
             self._last_model_used = "claude-sonnet-4-5"
-            response = await self._chat(message)
-            self._last_bot_response = response  # keep full response for next intent parse
-
-            # LEARN: Extract preferences/facts from conversational messages
-            await self._learn_from_conversation(message, response)
-            return response
+            model_tier = self._get_model_tier(message)
+            return await self.agent.run(
+                task=agent_task,
+                max_iterations=15,
+                system_prompt=await self._build_system_prompt(message),
+                model_tier=model_tier
+            )
 
         else:
             # Unknown — default to chat
