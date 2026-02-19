@@ -72,7 +72,7 @@ agent:
       - sudo deluser
       - sudo passwd
       # Network attacks
-      - :(){ :|:& };:  # fork bomb
+      - ":(){ :|:& };"  # fork bomb
       - sudo iptables -F  # flush firewall rules
       # Sensitive file access
       - cat /etc/shadow

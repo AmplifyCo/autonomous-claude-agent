@@ -195,7 +195,7 @@ class BashTool(BaseTool):
 
         # 1. Direct blocklist matching
         for blocked in self.blocked_commands:
-            if blocked.lower() in command_lower:
+            if str(blocked).lower() in command_lower:
                 logger.warning(f"Blocked by pattern: {blocked}")
                 return True
 
@@ -310,7 +310,7 @@ class BashTool(BaseTool):
 
         command_lower = command.lower().strip()
         for allowed in self.allowed_commands:
-            if command_lower.startswith(allowed.lower()):
+            if command_lower.startswith(str(allowed).lower()):
                 return True
         return False
 
@@ -328,6 +328,6 @@ class BashTool(BaseTool):
 
         command_lower = command.lower().strip()
         for allowed_pattern in self.allowed_sudo_commands:
-            if command_lower.startswith(allowed_pattern.lower()):
+            if command_lower.startswith(str(allowed_pattern).lower()):
                 return True
         return False

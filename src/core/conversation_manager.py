@@ -727,6 +727,48 @@ User says "good morning" → none"""
         except Exception as e:
             logger.debug(f"Learning from conversation failed (non-critical): {e}")
 
+    def _get_tool_context_for_intent(self) -> Dict[str, Any]:
+        """Dynamically extract tool context to avoid hardcoding intents.
+        
+        Returns:
+            Dict with tool names, descriptions, and derived keywords.
+        """
+        tool_names = []
+        tool_descriptions = []
+        # Base keywords that always imply action
+        action_keywords = {
+            "implement", "create", "build", "add", "make",
+            "fix", "update", "change", "modify", "refactor",
+            "delete", "remove", "write", "install", "deploy",
+            "run", "execute", "test", "debug",
+            "post", "tweet", "send", "reply", "forward",
+            "fetch", "download", "upload", "search",
+            "check", "read", "schedule", "list", "show",
+            "email"
+        }
+
+        if hasattr(self.agent, 'tools'):
+            try:
+                definitions = self.agent.tools.get_tool_definitions()
+                for tool in definitions:
+                    name = tool.get('name', '')
+                    desc = tool.get('description', '')
+                    tool_names.append(name)
+                    tool_descriptions.append(f"- {name}: {desc}")
+                    
+                    # Add tool name parts to keywords (e.g. "email_send" -> "email", "send")
+                    for part in name.split('_'):
+                        if len(part) > 2:  # Skip short parts
+                            action_keywords.add(part)
+            except Exception as e:
+                logger.debug(f"Error getting tool definitions: {e}")
+
+        return {
+            "names": tool_names,
+            "descriptions": "\n".join(tool_descriptions),
+            "keywords": list(action_keywords)
+        }
+
     async def _parse_intent_with_fallback(self, message: str) -> Dict[str, Any]:
         """Parse user intent: Haiku (with conversation history) → keyword fallback.
 
@@ -806,13 +848,10 @@ User says "good morning" → none"""
             intent_model = getattr(self.agent.config, 'intent_model', 'claude-haiku-4-5')
 
             # Build tool awareness for smarter routing
-            tool_names = []
-            if hasattr(self.agent, 'tools'):
-                tool_names = [t.name for t in self.agent.tools]
-
+            tool_data = self._get_tool_context_for_intent()
             tool_context = ""
-            if tool_names:
-                tool_context = f"\nAvailable tools: {', '.join(tool_names)}.\n"
+            if tool_data["descriptions"]:
+                tool_context = f"\nAVAILABLE TOOLS (Map request to these if possible):\n{tool_data['descriptions']}\n"
 
             # Build conversation history context
             history_context = ""
@@ -831,6 +870,7 @@ Confidence: high, medium, low
 Inferred_task: what to DO, "none" for chat, or clarification question
 
 Rules:
+- If request matches a capability in AVAILABLE TOOLS, intent is ALWAYS "action"
 - Use history for context ("yes do it" = execute last discussed action)
 - Action wins when both action+conversation present
 - INTERPRET meaning, don't parrot literal words
@@ -838,11 +878,7 @@ Rules:
 
 Examples:
 "Post on X: AI is the future" → action|high|Post exact: AI is the future
-"Post on X that your name is Nova" → action|high|Compose post: introduce yourself as Nova
-"Send email to John about the delay" → action|high|Compose email to John about the delay
-"Remind me dentist at 5" → action|high|Set reminder for dentist at 5pm
-"Check my email" → action|high|Check inbox
-"yes do it" (after pending action) → action|high|Execute previously discussed action
+"Check my email" → action|high|Check inbox (matches email tool)
 "Good morning!" → conversation|high|none
 "Call me boss" → conversation|high|none
 "What's the weather?" → question|high|none
@@ -977,15 +1013,12 @@ Return ONLY ONE WORD: build_feature, status, question, or action"""
             "add feature", "new feature", "develop"
         ]):
             return {"action": "build_feature", "confidence": 0.8, "parameters": {}}
-        elif any(word in msg_lower for word in [
-            "post", "tweet", "send", "reply", "forward",
-            "fetch", "download", "upload", "search",
-            "check inbox", "read email", "schedule",
-            "fix", "update", "change", "modify", "delete",
-            "remove", "install", "deploy", "run", "execute",
-            "post on x", "send email", "check email",
-        ]):
+        
+        # Dynamic tool keyword matching
+        tool_data = self._get_tool_context_for_intent()
+        if any(word in msg_lower for word in tool_data["keywords"]):
             return {"action": "action", "confidence": 0.8, "parameters": {}}
+            
         elif msg_lower.strip().endswith("?") or any(word in msg_lower for word in [
             "what", "how", "why", "when", "where", "which",
             "is ", "are ", "does ", "can ", "should ",
@@ -1011,16 +1044,9 @@ Return ONLY ONE WORD: build_feature, status, question, or action"""
         """
         msg_lower = message.lower()
 
-        # Action keywords (imperative verbs)
-        action_keywords = [
-            "implement", "create", "build", "add", "make",
-            "fix", "update", "change", "modify", "refactor",
-            "delete", "remove", "write", "install", "deploy",
-            "run", "execute", "test", "debug",
-            "post", "tweet", "send", "reply", "forward",
-            "fetch", "download", "upload", "search",
-            "check inbox", "read email", "schedule",
-        ]
+        # Get dynamic keywords from tools
+        tool_data = self._get_tool_context_for_intent()
+        action_keywords = tool_data["keywords"]
 
         # Question keywords
         question_keywords = [
