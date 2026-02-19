@@ -94,6 +94,11 @@ if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
     fi
     "$SCRIPT_DIR/venv/bin/pip" install -r requirements.txt 2>&1 | tee -a "$LOG_FILE"
     
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+        log "❌ Dependency installation failed. Aborting restart."
+        exit 1
+    fi
+    
     # Ensure rights (if run as root/sudo but user owns dir)
     # Ensure correct permissions (recursive)
     # This prevents root-owned files from breaking the service
