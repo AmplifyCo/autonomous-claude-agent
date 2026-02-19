@@ -425,33 +425,49 @@ class ConversationManager:
                 raise
 
     # ── Model tier classification ────────────────────────────────────
-    # Keywords that indicate simple tool tasks → Gemini Flash
-    _FLASH_KEYWORDS = [
-        "remind", "reminder", "alarm", "timer",
-        "contact", "save contact", "search contact",
-        "what time", "clock", "current time",
-        "send whatsapp", "text ", "message ",
-        "calendar", "schedule", "event",
-        "list email", "read email", "check email", "delete email",
-        "list reminder", "cancel reminder",
+    # Keywords that indicate complex reasoning/coding -> Sonnet tier
+    _COMPLEX_KEYWORDS = [
+        "code", "function", "script", "debug", "fix", "error",
+        "analyze", "explain", "why", "how", "reason", "assess",
+        "plan", "strategy", "architect", "design", "evaluate",
+        "linux", "bash", "terminal", "system", # System ops often need care
     ]
-    # Keywords that indicate email compose → quality tier (Claude + retry + Gemini Pro)
+    # Keywords that indicate email compose -> quality tier (Claude + retry + Gemini Pro)
     _QUALITY_KEYWORDS = [
         "compose", "draft", "write email", "send email", "email to",
         "reply to email", "respond to email", "forward email",
+        "write a letter", "formal message",
+    ]
+
+    # Keywords that indicate moderate complexity -> Haiku tier (Creative/Analysis)
+    _HAIKU_KEYWORDS = [
+        "brainstorm", "idea", "list", "summarize", "rewrite", "suggest",
+        "compare", "pros and cons", "outline", "draft a plan",
+        "describe", "tell me about", "what is",
     ]
 
     def _get_model_tier(self, message: str) -> str:
-        """Classify message into model tier: flash, sonnet, or quality."""
+        """Classify message into model tier: flash (default), haiku, sonnet, or quality."""
         msg_lower = message.lower()
-        # Check quality first (email compose is a subset of email actions)
+        
+        # 1. Quality Tier (High-stakes communication)
         for kw in self._QUALITY_KEYWORDS:
             if kw in msg_lower:
                 return "quality"
-        for kw in self._FLASH_KEYWORDS:
+                
+        # 2. Sonnet Tier (Complex reasoning/coding)
+        for kw in self._COMPLEX_KEYWORDS:
             if kw in msg_lower:
-                return "flash"
-        return "sonnet"
+                return "sonnet"
+
+        # 3. Haiku Tier (Creative/Moderate)
+        for kw in self._HAIKU_KEYWORDS:
+            if kw in msg_lower:
+                return "haiku"
+                
+        # 4. Flash Tier (Default for 24/7 operations)
+        # Handles: reminders, calendar, contacts, simple queries, chit-chat
+        return "flash"
 
     async def _execute_with_primary_model(
         self,

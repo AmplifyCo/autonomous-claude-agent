@@ -212,8 +212,9 @@ class AutonomousAgent:
 
     # ── Model tier constants ──────────────────────────────────────────
     MODEL_GEMINI_FLASH = "gemini/gemini-2.0-flash"
-    MODEL_CLAUDE_SONNET = "anthropic/claude-sonnet-4-5"
-    MODEL_GEMINI_PRO = "gemini/gemini-2.5-pro-preview-05-06"
+    MODEL_CLAUDE_SONNET = "anthropic/claude-3-5-sonnet-20241022"
+    MODEL_CLAUDE_HAIKU = "anthropic/claude-3-haiku-20240307"
+    MODEL_GEMINI_PRO = "gemini/gemini-1.5-pro"
 
     async def _call_llm(
         self,
@@ -229,6 +230,7 @@ class AutonomousAgent:
 
         Tiers:
             flash:   Gemini Flash primary → Claude Sonnet fallback
+            haiku:   Claude Haiku primary → Gemini Flash fallback
             sonnet:  Claude Sonnet primary → Gemini Flash fallback
             quality: Claude Sonnet → retry with wait → Gemini Pro fallback
         """
@@ -255,6 +257,23 @@ class AutonomousAgent:
                 logger.warning(f"Gemini Flash failed ({str(e)[:60]}), trying Claude...")
                 return await self.gemini_client.create_message(
                     model=self.MODEL_CLAUDE_SONNET,
+                    messages=messages, tools=tools,
+                    system=system_prompt, max_tokens=max_tokens
+                )
+
+        elif model_tier == "haiku":
+            # ── Claude Haiku primary → Gemini Flash fallback ──
+            try:
+                logger.info("💨 LiteLLM → Claude Haiku")
+                return await self.gemini_client.create_message(
+                    model=self.MODEL_CLAUDE_HAIKU,
+                    messages=messages, tools=tools,
+                    system=system_prompt, max_tokens=max_tokens
+                )
+            except Exception as e:
+                logger.warning(f"Claude Haiku failed ({str(e)[:60]}), falling back to Gemini Flash...")
+                return await self.gemini_client.create_message(
+                    model=self.MODEL_GEMINI_FLASH,
                     messages=messages, tools=tools,
                     system=system_prompt, max_tokens=max_tokens
                 )
