@@ -76,11 +76,22 @@ if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
     # Update dependencies if requirements.txt changed
     # Always check/install dependencies to ensure environment is correct
     log "📦 Checking/Installing dependencies..."
-    # Use venv pip if available, else fall back to system pip
-    if [ -f "$SCRIPT_DIR/venv/bin/pip" ]; then
-        "$SCRIPT_DIR/venv/bin/pip" install -r requirements.txt 2>&1 | tee -a "$LOG_FILE"
-    else
-        python3 -m pip install -r requirements.txt 2>&1 | tee -a "$LOG_FILE"
+    log "📦 Checking/Installing dependencies..."
+    
+    # Verify/Create venv
+    if [ ! -f "$SCRIPT_DIR/venv/bin/pip" ] || ! "$SCRIPT_DIR/venv/bin/python3" --version >/dev/null 2>&1; then
+        log "⚠️  Virtual environment missing or broken. Recreating..."
+        rm -rf "$SCRIPT_DIR/venv"
+        python3 -m venv "$SCRIPT_DIR/venv"
+        log "✅ Virtual environment created"
+    fi
+
+    # Install dependencies
+    "$SCRIPT_DIR/venv/bin/pip" install -r requirements.txt 2>&1 | tee -a "$LOG_FILE"
+    
+    # Ensure rights (if run as root/sudo but user owns dir)
+    if [ -n "$SUDO_USER" ]; then
+        chown -R "$SUDO_USER" "$SCRIPT_DIR/venv"
     fi
 
     # Refresh global dt-setup if it changed and is installed globally
