@@ -396,13 +396,19 @@ class ConversationManager:
         """
         action = intent.get("action", "unknown")
         inferred_task = intent.get("inferred_task")
+        conversation_history = intent.get("_conversation_history", "")
 
         # Build the task description for the agent
-        # If Haiku inferred a specific task, use it (more precise than raw message)
+        # Include recent conversation history so the agent understands context
+        # (e.g. "yes" after "Want me to delete those 3 emails?" makes sense with history)
+        context_prefix = ""
+        if conversation_history:
+            context_prefix = f"RECENT CONVERSATION (for context):\n{conversation_history}\n\n---\n"
+
         if inferred_task:
-            agent_task = f"User said: \"{message}\"\n\nInferred task: {inferred_task}"
+            agent_task = f"{context_prefix}User said: \"{message}\"\n\nTask: {inferred_task}"
         else:
-            agent_task = f"User request: {message}"
+            agent_task = f"{context_prefix}User request: {message}"
 
         if action == "build_feature":
             # Always use Opus architect
@@ -789,6 +795,8 @@ User says "good morning" → none"""
         try:
             result = await self._parse_intent(message, conversation_history)
             logger.info(f"Haiku intent: {result['action']} (confidence: {result['confidence']}, inferred: {result.get('inferred_task', 'none')})")
+            # Attach history so _execute_with_primary_model can include it in agent context
+            result["_conversation_history"] = conversation_history
             return result
         except Exception as e:
             logger.warning(f"Haiku intent failed, using keyword fallback: {e}")
@@ -796,6 +804,7 @@ User says "good morning" → none"""
         # FALLBACK: Keyword matching (when API is down/rate-limited)
         result = await self._parse_intent_locally(message)
         logger.info(f"Keyword intent: {result['action']} (confidence: {result['confidence']})")
+        result["_conversation_history"] = conversation_history
         return result
 
     async def _get_recent_history_for_intent(self) -> str:
@@ -822,9 +831,10 @@ User says "good morning" → none"""
                 user_msg = turn.get("user_message", "")
                 bot_msg = turn.get("assistant_response", "")
                 if user_msg:
-                    history_lines.append(f"User: {user_msg[:150]}")
+                    history_lines.append(f"User: {user_msg[:200]}")
                 if bot_msg:
-                    history_lines.append(f"Bot: {bot_msg[:150]}")
+                    # Use 600 chars so email/event lists with IDs aren't cut off
+                    history_lines.append(f"Bot: {bot_msg[:600]}")
 
             return "\n".join(history_lines)
         except Exception as e:
@@ -879,6 +889,9 @@ Rules:
 Examples:
 "Post on X: AI is the future" → action|high|Post exact: AI is the future
 "Check my email" → action|high|Check inbox (matches email tool)
+"yes" (after bot proposed deleting 3 emails) → action|high|Delete the 3 emails as proposed
+"yes" (after bot proposed scheduling meeting) → action|high|Schedule the meeting as proposed
+"do it" / "go ahead" / "confirm" (after any bot proposal) → action|high|Execute the proposed action
 "Good morning!" → conversation|high|none
 "Call me boss" → conversation|high|none
 "What's the weather?" → question|high|none
