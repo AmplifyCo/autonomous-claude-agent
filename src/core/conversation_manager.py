@@ -39,6 +39,7 @@ import logging
 import re
 import time
 import uuid
+from collections import deque
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from src.core.security.llm_security import LLMSecurityGuard
@@ -117,6 +118,11 @@ class ConversationManager:
         # Last bot response stored in full (untruncated) — passed to intent LLM so it
         # can understand "yes"/"do it" without history truncation losing the proposal.
         self._last_bot_response: Optional[str] = None
+
+        # In-memory conversation buffer: reliable short-term context (last 10 turns)
+        # ChromaDB semantic search is NOT chronological — this deque is.
+        # Each entry: {"user_message": str, "assistant_response": str, "timestamp": str}
+        self._conversation_buffer: deque = deque(maxlen=10)
 
         # Per-session locking: prevents concurrent processing of same user's messages
         self._session_locks: Dict[str, asyncio.Lock] = {}
@@ -309,6 +315,16 @@ class ConversationManager:
                         **(metadata or {})
                     }
                 )
+
+            # In-memory buffer: instant, reliable short-term context
+            self._conversation_buffer.append({
+                "user_message": message,
+                "assistant_response": filtered_response,
+                "timestamp": datetime.now().isoformat()
+            })
+
+            # Keep full last response for "yes"/"do it" understanding
+            self._last_bot_response = filtered_response
 
             elapsed = time.time() - start_time
             logger.info(f"[{trace_id}] Completed in {elapsed:.2f}s | model={self._last_model_used} | channel={channel} | prompt_v={self.PROMPT_VERSION}")
@@ -1014,9 +1030,28 @@ User says "good morning" → none"""
     async def _get_recent_history_for_intent(self) -> str:
         """Get recent conversation history formatted for intent classification.
 
+        Uses the in-memory conversation buffer (reliable, chronological)
+        instead of ChromaDB semantic search (which is NOT chronological).
+
         Returns:
             Formatted conversation history string (last 3 turns)
         """
+        # PRIMARY: In-memory buffer (instant, always correct order)
+        if self._conversation_buffer:
+            history_lines = []
+            # Get last 3 turns from buffer (already in chronological order)
+            recent_turns = list(self._conversation_buffer)[-3:]
+            for turn in recent_turns:
+                user_msg = turn.get("user_message", "")
+                bot_msg = turn.get("assistant_response", "")
+                if user_msg:
+                    history_lines.append(f"User: {user_msg[:200]}")
+                if bot_msg:
+                    history_lines.append(f"Nova: {bot_msg[:600]}")
+            if history_lines:
+                return "\n".join(history_lines)
+
+        # FALLBACK: ChromaDB (for when buffer is empty, e.g. after restart)
         if not self.brain or not hasattr(self.brain, 'get_recent_conversation'):
             return ""
 
@@ -1037,8 +1072,7 @@ User says "good morning" → none"""
                 if user_msg:
                     history_lines.append(f"User: {user_msg[:200]}")
                 if bot_msg:
-                    # Use 600 chars so email/event lists with IDs aren't cut off
-                    history_lines.append(f"Bot: {bot_msg[:600]}")
+                    history_lines.append(f"Nova: {bot_msg[:600]}")
 
             return "\n".join(history_lines)
         except Exception as e:
