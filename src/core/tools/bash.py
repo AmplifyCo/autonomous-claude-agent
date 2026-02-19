@@ -52,8 +52,8 @@ class BashTool(BaseTool):
             "sudo shutdown",
             "sudo reboot",
             "sudo poweroff",
-            "format",
-            "mkfs",
+            "format c:",
+            "mkfs.",
             "dd if=",
             "sudo dd",
         ]
