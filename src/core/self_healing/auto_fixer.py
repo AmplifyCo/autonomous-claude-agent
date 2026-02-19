@@ -668,19 +668,18 @@ class AutoFixer:
         # 4. Assess Security Risk
         risk_level, risk_reason = await self._assess_security_risk(fix_diff, file_path)
         
+        fix_id = f"fix-{int(datetime.now().timestamp())}"
+        branch_name = f"auto-fix/{fix_id}"
+        
         if risk_level == "SENSITIVE":
-            # Save for review
-            output_dir = Path("data/pending_fixes")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            fix_id = f"fix_{int(datetime.now().timestamp())}.diff"
-            with open(output_dir / fix_id, 'w') as f:
-                f.write(fix_diff)
+            # Push to branch ONLY (do not apply)
+            await self._push_fix_to_branch(file_path, fix_diff, branch_name, f"Security-gated fix for {error.error_type.value}")
             
             return FixResult(
-                success=True, # It was "handled" successfully, even if not applied
+                success=True,
                 error_type=error.error_type,
-                action_taken="⚠️ Fix saved for review (Security Risk)",
-                details=f"Classified as SENSITIVE: {risk_reason}. Review at {output_dir}/{fix_id}",
+                action_taken=f"⚠️ Fix pushed to branch {branch_name} (Security Risk)",
+                details=f"Classified as SENSITIVE: {risk_reason}. Review branch {branch_name}",
                 requires_restart=False
             )
 
@@ -692,19 +691,14 @@ class AutoFixer:
                 tmp.write(fix_diff)
                 tmp_path = tmp.name
             
-            # Apply patch
-            # patch -p0 < fix.diff (assuming paths are compatible, might need adjustment)
-            # Actually, unified diffs usually need -p1 or -p0 depending on how they were generated.
-            # We'll ask LLM to generate diffs processing relative to project root.
-            
+            # Apply patch locally
             proc = await asyncio.create_subprocess_shell(
                 f"patch -p0 < {tmp_path}",
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
             stdout, stderr = await proc.communicate()
-            
-            Path(tmp_path).unlink() # Cleanup
+            Path(tmp_path).unlink()
 
             if proc.returncode != 0:
                  return FixResult(
@@ -714,11 +708,14 @@ class AutoFixer:
                     details=stderr.decode()
                 )
 
+            # Push to branch for record keeping/merge
+            await self._push_fix_to_branch(file_path, fix_diff, branch_name, f"Auto-fix for {error.error_type.value}")
+
             return FixResult(
                 success=True,
                 error_type=error.error_type,
-                action_taken="Applied AI Code Fix",
-                details="Automatically patched code bug via LLM",
+                action_taken=f"Applied fix & pushed to {branch_name}",
+                details="Automatically patched and backed up to git branch",
                 requires_restart=True
             )
 
@@ -767,6 +764,26 @@ class AutoFixer:
             logger.error(f"LLM fix generation failed: {e}")
             return None
 
+
+
+    def _contains_secrets(self, diff: str) -> tuple[bool, str]:
+        """Check if diff contains potential secrets."""
+        # Common secret patterns
+        patterns = [
+            (r"BEGIN A PRIVATE KEY", "Private Key"),
+            (r"sk-[a-zA-Z0-9]{20,}", "OpenAI API Key"),
+            (r"xox[baprs]-([0-9a-zA-Z]{10,48})?", "Slack Token"),
+            (r"gh[pousr]_[a-zA-Z0-9]{36,}", "GitHub Token"),
+            (r"(api_key|apikey|secret|token|password|passwd|pwd)\s*[:=]\s*['\"][a-zA-Z0-9_\-]{8,}['\"]", "Generic Secret Assignment"),
+            (r"Authorization:\s*Bearer\s+[a-zA-Z0-9_\-\.]+", "Bearer Token"),
+        ]
+        
+        for pattern, name in patterns:
+            if re.search(pattern, diff, re.IGNORECASE):
+                return True, name
+                
+        return False, ""
+
     async def _assess_security_risk(self, diff: str, file_path: str) -> tuple[str, str]:
         """Assess if the fix is SAFE or SENSITIVE."""
         # 1. Hardcoded Rules
@@ -774,10 +791,13 @@ class AutoFixer:
             return "SENSITIVE", "Modifies security module"
         if "bash.py" in file_path and ("blocked_commands" in diff or "allowed_commands" in diff):
             return "SENSITIVE", "Modifies bash tool security filters"
-        if any(w in diff.lower() for w in ["password", "secret", "api_key", "auth", "encrypt"]):
-            return "SENSITIVE", "Contains auth/secret keywords"
             
-        # 2. LLM Judge (Gemini Flash for speed/cost)
+        # 2. Secret Scanning (Strict)
+        has_secret, secret_type = self._contains_secrets(diff)
+        if has_secret:
+            return "SENSITIVE", f"Potential secret detected ({secret_type})"
+            
+        # 3. LLM Judge (Gemini Flash for speed/cost)
         try:
             response = await self.llm_client.create_message(
                 model="gemini/gemini-2.0-flash",
@@ -796,3 +816,66 @@ class AutoFixer:
             return "SENSITIVE", "Security check failed (fail-safe)" # Fail safe
             
         return "SAFE", "Passed checks"
+
+    async def _push_fix_to_branch(self, file_path: str, diff: str, branch_name: str, commit_msg: str):
+        """Push the fix to a new git branch without disrupting the current working tree."""
+        try:
+            # 1. Fetch latest to ensure we have base
+            await asyncio.create_subprocess_shell("git fetch origin main")
+            
+            # 2. Create and checkout the branch
+            # We use the current repo, assuming 'main' is clean-ish or we can switch back
+            # Actually, switching branches in a running agent is risky.
+            # SAFER: Create a temporary worktree
+            import tempfile
+            import shutil
+            
+            repo_root = Path.cwd()
+            
+            # Use git worktree to create a parallel working directory linked to this repo
+            # This avoids messing with the running agent's files
+            worktree_path = repo_root / "data" / "worktrees" / branch_name.split('/')[-1]
+            worktree_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Clean up if exists
+            if worktree_path.exists():
+                shutil.rmtree(worktree_path)
+
+            # Create worktree based on main
+            cmd = f"git worktree add -b {branch_name} {worktree_path} origin/main"
+            proc = await asyncio.create_subprocess_shell(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            await proc.communicate()
+            
+            if proc.returncode != 0:
+                logger.error(f"Failed to create worktree: {branch_name}")
+                return
+
+            try:
+                # Apply patch in worktree
+                patch_file = worktree_path / "fix.diff"
+                with open(patch_file, 'w') as f:
+                    f.write(diff)
+                
+                # Apply patch
+                cmd_patch = f"cd {worktree_path} && patch -p0 < fix.diff"
+                await (await asyncio.create_subprocess_shell(cmd_patch)).communicate()
+                
+                # Remove patch file
+                patch_file.unlink()
+                
+                # Commit and Push
+                cmd_push = f"cd {worktree_path} && git add . && git commit -m '{commit_msg}' && git push origin {branch_name}"
+                await (await asyncio.create_subprocess_shell(cmd_push)).communicate()
+                
+                logger.info(f"Pushed fix to branch {branch_name}")
+                
+            finally:
+                # Cleanup worktree
+                cmd_clean = f"git worktree remove {worktree_path} --force"
+                await (await asyncio.create_subprocess_shell(cmd_clean)).communicate()
+                # Worktree remove sometimes leaves the dir, ensure gone
+                if worktree_path.exists():
+                    shutil.rmtree(worktree_path)
+                    
+        except Exception as e:
+            logger.error(f"Failed to push fix branch: {e}")
