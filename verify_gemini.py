@@ -35,13 +35,13 @@ async def check_version():
     # Test 2: Alias check
     print("\n--- Test 2: Alias Resolution (gemini-pro-latest) ---")
     try:
-        response = await acompletion(
+        response = await asyncio.wait_for(acompletion(
             model="gemini/gemini-pro-latest",
             messages=[{
                 "role": "user", 
                 "content": "What is your exact model version? Are you Gemini 1.5, 2.0, or 3.1? What is your knowledge cutoff date?"
             }]
-        )
+        ), timeout=10.0)
         print(f"\nResponse Type: {type(response)}")
         print("\n--- Model Response ---")
         if hasattr(response, 'choices'):
