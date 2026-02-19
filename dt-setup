@@ -378,11 +378,27 @@ fix_permissions() {
                  echo "🔧 Fixing permissions for user: $TARGET_USER"
             fi
             chown -R "$TARGET_USER:$TARGET_USER" "$SCRIPT_DIR"
-            # Ensure directories are executable/writable by owner
+            
+            # Directories: 755
             find "$SCRIPT_DIR" -type d -exec chmod 755 {} +
+            
+            # Files: 644 (read/write owner, read others)
+            find "$SCRIPT_DIR" -type f -not -name "dt-setup" -not -name "*.sh" -not -name "*.py" -exec chmod 644 {} +
+            
+            # Executables should remain executable
+            chmod +x "$SCRIPT_DIR/dt-setup" "$SCRIPT_DIR/auto-update.sh" "$SCRIPT_DIR/configure.py"
+            
+            # .env: 600 (read/write owner ONLY) - Security
+            if [ -f "$SCRIPT_DIR/.env" ]; then
+                chmod 600 "$SCRIPT_DIR/.env"
+            fi
+
             # Ensure logs are writable
-            if [ -d "$SCRIPT_DIR/data/logs" ]; then
-                chmod 775 "$SCRIPT_DIR/data/logs"
+            if [ -d "$SCRIPT_DIR/logs" ]; then
+                chmod 775 "$SCRIPT_DIR/logs"
+            fi
+            if [ -d "$SCRIPT_DIR/data" ]; then
+                chmod 775 "$SCRIPT_DIR/data"
             fi
         fi
     fi
