@@ -99,6 +99,12 @@ if git pull origin main 2>&1 | tee -a "$LOG_FILE"; then
             if id "$TARGET_USER" &>/dev/null; then
                 log "🔧 Fixing permissions for user: $TARGET_USER"
                 chown -R "$TARGET_USER:$TARGET_USER" "$SCRIPT_DIR"
+                # Ensure directories are executable/writable by owner
+                find "$SCRIPT_DIR" -type d -exec chmod 755 {} +
+                # Ensure logs are writable
+                if [ -d "$SCRIPT_DIR/data/logs" ]; then
+                    chmod 775 "$SCRIPT_DIR/data/logs"
+                fi
             else
                 log "⚠️  User $TARGET_USER not found, skipping chown"
             fi

@@ -279,6 +279,12 @@ fix_permissions() {
                  echo "🔧 Fixing permissions for user: $TARGET_USER"
             fi
             chown -R "$TARGET_USER:$TARGET_USER" "$SCRIPT_DIR"
+            # Ensure directories are executable/writable by owner
+            find "$SCRIPT_DIR" -type d -exec chmod 755 {} +
+            # Ensure logs are writable
+            if [ -d "$SCRIPT_DIR/data/logs" ]; then
+                chmod 775 "$SCRIPT_DIR/data/logs"
+            fi
         fi
     fi
 }
