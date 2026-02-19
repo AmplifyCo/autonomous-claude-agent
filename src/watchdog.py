@@ -99,7 +99,17 @@ class ServiceWatchdog:
             text = line.decode().strip()
             if text:
                 if origin == "stderr":
-                    logger.error(f"[AGENT] {text}")
+                    # Check for log levels in the text to avoid false errors
+                    level = logging.ERROR
+                    upper_text = text.upper()
+                    if "INFO" in upper_text or "INFO:" in upper_text:
+                        level = logging.INFO
+                    elif "WARNING" in upper_text or "WARN:" in upper_text:
+                        level = logging.WARNING
+                    elif "DEBUG" in upper_text:
+                        level = logging.DEBUG
+                        
+                    logger.log(level, f"[AGENT] {text}")
                     # Capture for analysis
                     self._capture_crash_log(text)
                 else:
