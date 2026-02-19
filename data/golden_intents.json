@@ -1,0 +1,137 @@
+[
+  {
+    "intent": "status",
+    "examples": [
+      "status",
+      "system status",
+      "check health",
+      "are you running",
+      "uptime",
+      "report status",
+      "health check",
+      "system health"
+    ],
+    "tools": []
+  },
+  {
+    "intent": "git_update",
+    "examples": [
+      "git pull",
+      "git update",
+      "pull from git",
+      "update code",
+      "download updates",
+      "fetch changes",
+      "upgrade system"
+    ],
+    "tools": []
+  },
+  {
+    "intent": "restart",
+    "examples": [
+      "restart",
+      "reboot",
+      "restart system",
+      "reboot agent",
+      "restart service"
+    ],
+    "tools": []
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "check email",
+      "check my email",
+      "read inbox",
+      "do I have any new emails",
+      "list unread emails",
+      "show me my emails",
+      "read my latest email",
+      "any urgent emails"
+    ],
+    "tools": [
+      "email_list"
+    ]
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "reply to this email",
+      "reply to john",
+      "send a reply",
+      "respond to that",
+      "draft a response"
+    ],
+    "tools": [
+      "email_send",
+      "email_draft"
+    ]
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "send an email to sarah",
+      "write an email",
+      "compose email",
+      "reach out to alex",
+      "email marketing team"
+    ],
+    "tools": [
+      "email_send"
+    ]
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "set a reminder",
+      "remind me to call mom",
+      "remind me in 10 minutes",
+      "set reminder for 2pm",
+      "add to todo list"
+    ],
+    "tools": [
+      "reminder_set"
+    ]
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "check calendar",
+      "whats on my calendar",
+      "any meetings today",
+      "list events",
+      "show schedule",
+      "calendar for today"
+    ],
+    "tools": [
+      "calendar_list"
+    ]
+  },
+  {
+    "intent": "action",
+    "examples": [
+      "post on x",
+      "tweet this",
+      "send a tweet",
+      "post to twitter"
+    ],
+    "tools": [
+      "x_post"
+    ]
+  },
+  {
+    "intent": "conversation",
+    "examples": [
+      "good morning",
+      "hello",
+      "hi",
+      "hey",
+      "good night",
+      "thank you",
+      "thanks",
+      "cool",
+      "nice"
+    ],
+    "tools": []
+  }
+]

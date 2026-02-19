@@ -64,7 +64,8 @@ class ConversationManager:
         anthropic_client,
         model_router,
         brain=None,
-        gemini_client=None
+        gemini_client=None,
+        semantic_router=None
     ):
         """Initialize conversation manager.
 
@@ -73,11 +74,14 @@ class ConversationManager:
             anthropic_client: Anthropic API client
             model_router: ModelRouter for intelligent model selection
             brain: Brain instance (optional, will auto-select if not provided)
+            brain: Brain instance (optional, will auto-select if not provided)
             gemini_client: Optional GeminiClient for intent parsing + simple chat
+            semantic_router: Optional SemanticRouter for fast-path intent classification
         """
         self.agent = agent
         self.anthropic_client = anthropic_client
         self.gemini_client = gemini_client  # None = Gemini disabled, Claude handles everything
+        self.semantic_router = semantic_router
         self.router = model_router
 
         # TWO BRAINS:
@@ -359,8 +363,22 @@ class ConversationManager:
             )
 
         try:
-            # Parse user intent
-            intent = await self._parse_intent_with_fallback(message)
+            # PHASE 1: Semantic Routing (Fast Path)
+            # Check for exact/close matches in golden examples (bypass LLM)
+            intent = None
+            if self.semantic_router:
+                intent = await self.semantic_router.route(message)
+                if intent:
+                    logger.info(f"🚀 Semantic Router match: {intent['action']} ({intent['confidence']:.2f})")
+                    # Add missing fields needed for execution
+                    intent["inferred_task"] = message  # Use message as task
+                    intent["parameters"] = {}
+                    # Add history so the agent has context even on fast path
+                    intent["_conversation_history"] = await self._get_recent_history_for_intent()
+
+            # PHASE 2: LLM Intent Parsing (Slow Path)
+            if not intent:
+                intent = await self._parse_intent_with_fallback(message)
 
             # Use router to determine best model
             action = intent.get("action", "unknown")

@@ -10,7 +10,9 @@ python-dotenv>=1.0.0
 aiofiles>=23.2.1
 
 # Brain - Vector Database (using default embeddings, no PyTorch)
+# Brain - Vector Database (using default embeddings, no PyTorch)
 chromadb>=0.4.22
+pydantic-settings>=2.0.0
 
 # Monitoring & Notifications
 python-telegram-bot>=21.0

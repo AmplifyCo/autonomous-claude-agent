@@ -28,7 +28,9 @@ from src.integrations.gemini_client import GeminiClient
 from src.core.scheduler import ReminderScheduler
 from src.core.self_healing.monitor import SelfHealingMonitor
 from src.core.memory_consolidator import MemoryConsolidator
+from src.core.memory_consolidator import MemoryConsolidator
 from src.utils.memory_backup import MemoryBackup
+from src.core.brain.semantic_router import SemanticRouter
 
 # Setup logging — file handler is best-effort (don't crash if permission denied)
 LOG_DIR = Path("data/logs")
@@ -253,13 +255,24 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             if gemini_client:
                 logger.info("✨ Gemini Flash enabled — intent parsing + simple chat + fallback")
 
+            # Initialize Semantic Router (fast-path intent classification)
+            semantic_router = SemanticRouter()
+            # Initialize async (load golden intents) - will be awaited on first use if not here
+            # but better to do it now to catch errors early
+            try:
+                await semantic_router.initialize()
+            except Exception as e:
+                logger.warning(f"Semantic Router init failed (continuing without it): {e}")
+                semantic_router = None
+
             # Initialize ConversationManager (channel-agnostic core intelligence)
             conversation_manager = ConversationManager(
                 agent=agent,
                 anthropic_client=api_client,
                 model_router=model_router,
                 brain=brain,  # Auto-selected CoreBrain or DigitalCloneBrain
-                gemini_client=gemini_client  # Optional — None = Claude handles everything
+                gemini_client=gemini_client,  # Optional — None = Claude handles everything
+                semantic_router=semantic_router  # Optional — Fast path for intents
             )
 
             # Initialize TelegramChannel (thin transport wrapper)
