@@ -35,11 +35,13 @@ manager.switch_brain_mode("assistant")  # Switch to DigitalCloneBrain
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
 import uuid
 from collections import deque
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from src.core.security.llm_security import LLMSecurityGuard
@@ -124,6 +126,12 @@ class ConversationManager:
         # Each entry: {"user_message": str, "assistant_response": str, "timestamp": str}
         self._conversation_buffer: deque = deque(maxlen=10)
 
+        # Daily conversation log: persistent chronological record
+        # Stored as JSONL at data/conversations/YYYY-MM-DD.jsonl
+        self._conversations_dir = Path("data/conversations")
+        self._conversations_dir.mkdir(parents=True, exist_ok=True)
+        self._load_todays_conversations()  # Reload buffer from today's log on startup
+
         # Per-session locking: prevents concurrent processing of same user's messages
         self._session_locks: Dict[str, asyncio.Lock] = {}
 
@@ -142,6 +150,55 @@ class ConversationManager:
 
         logger.info(f"ConversationManager initialized (channel-agnostic, using {brain_type})")
         logger.info("🔒 LLM Security Guard enabled (prompt injection, data extraction, rate limiting)")
+
+    # ── Daily Conversation Log ──────────────────────────────────────────
+
+    def _save_to_daily_log(self, turn: Dict[str, Any]):
+        """Append a conversation turn to today's daily log file.
+
+        File: data/conversations/YYYY-MM-DD.jsonl (one JSON object per line)
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            log_file = self._conversations_dir / f"{today}.jsonl"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(turn, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to save daily conversation log: {e}")
+
+    def _load_todays_conversations(self):
+        """Load today's conversations from the daily log into the in-memory buffer.
+
+        Called on startup so context survives service restarts.
+        """
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            log_file = self._conversations_dir / f"{today}.jsonl"
+            if not log_file.exists():
+                logger.info("No conversation log for today yet")
+                return
+
+            turns = []
+            with open(log_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            turns.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+
+            # Load the last N turns into buffer (deque maxlen handles overflow)
+            for turn in turns:
+                self._conversation_buffer.append(turn)
+
+            # Restore last bot response for "yes"/"do it" continuity
+            if turns:
+                self._last_bot_response = turns[-1].get("assistant_response")
+
+            logger.info(f"Loaded {len(turns)} conversation turns from today's log")
+        except Exception as e:
+            logger.warning(f"Failed to load today's conversations: {e}")
 
     def switch_brain_mode(self, mode: str):
         """Switch between CoreBrain (build) and DigitalCloneBrain (assistant).
@@ -317,11 +374,17 @@ class ConversationManager:
                 )
 
             # In-memory buffer: instant, reliable short-term context
-            self._conversation_buffer.append({
+            turn = {
                 "user_message": message,
                 "assistant_response": filtered_response,
-                "timestamp": datetime.now().isoformat()
-            })
+                "timestamp": datetime.now().isoformat(),
+                "channel": channel,
+                "model": self._last_model_used
+            }
+            self._conversation_buffer.append(turn)
+
+            # Persist to daily log file (chronological, survives restarts)
+            self._save_to_daily_log(turn)
 
             # Keep full last response for "yes"/"do it" understanding
             self._last_bot_response = filtered_response
