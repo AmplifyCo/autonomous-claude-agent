@@ -7,6 +7,7 @@ attempts to auto-fix the issue using the AI AutoFixer.
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -141,8 +142,8 @@ class ServiceWatchdog:
             # Initialize minimal dependencies
             config = load_config()
             gemini_client = GeminiClient(
-                api_key=config.get('gemini_api_key'),
-                anthropic_api_key=config.get('anthropic_api_key')
+                api_key=os.getenv('GEMINI_API_KEY', ''),
+                anthropic_api_key=config.api_key
             )
             fixer = AutoFixer(llm_client=gemini_client)
             
