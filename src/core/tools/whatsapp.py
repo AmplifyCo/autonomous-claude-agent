@@ -34,18 +34,14 @@ class WhatsAppTool(BaseTool):
     @property
     def parameters(self) -> Dict[str, Any]:
         return {
-            "type": "object",
-            "properties": {
-                "to": {
-                    "type": "string",
-                    "description": "Recipient phone number (e.g. 15551234567). No + or dashes."
-                },
-                "body": {
-                    "type": "string",
-                    "description": "Message content to send"
-                }
+            "to": {
+                "type": "string",
+                "description": "Recipient phone number (e.g. 15551234567). No + or dashes."
             },
-            "required": ["to", "body"]
+            "body": {
+                "type": "string",
+                "description": "Message content to send"
+            }
         }
 
     async def execute(self, to: str, body: str, **kwargs) -> Dict[str, Any]:
