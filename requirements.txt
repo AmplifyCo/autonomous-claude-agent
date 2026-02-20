@@ -62,3 +62,4 @@ pytz>=2023.3
 #
 # For development:
 #   pip install pytest pytest-asyncio black ruff
+twilio>=9.0.0
