@@ -180,14 +180,40 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         # Register TwilioCallTool (outbound voice calls)
         twilio_phone = config.twilio_phone_number
         if config.twilio_account_sid and config.twilio_auth_token and twilio_phone:
+            # Determine public base URL for serving ElevenLabs audio to Twilio
+            call_base_url = None
+            tunnel_info_path = Path("data/cloudflare_tunnel.json")
+            if tunnel_info_path.exists():
+                try:
+                    import json as _json
+                    with open(tunnel_info_path, 'r') as f:
+                        tunnel_info = _json.load(f)
+                        tunnel_url = tunnel_info.get("webhook_url", "")
+                        # Extract base: "https://xxx.trycloudflare.com/telegram/webhook" → "https://xxx.trycloudflare.com"
+                        if "://" in tunnel_url:
+                            call_base_url = tunnel_url.split("/telegram")[0] if "/telegram" in tunnel_url else tunnel_url.rsplit("/", 1)[0]
+                except Exception:
+                    pass
+            if not call_base_url:
+                try:
+                    import subprocess as _sp
+                    public_ip = _sp.check_output(["curl", "-s", "ifconfig.me"], timeout=5).decode().strip()
+                    call_base_url = f"http://{public_ip}:{config.dashboard_port}"
+                except Exception:
+                    pass
+
             from src.core.tools.twilio_call import TwilioCallTool
             twilio_call_tool = TwilioCallTool(
                 account_sid=config.twilio_account_sid,
                 auth_token=config.twilio_auth_token,
-                from_number=twilio_phone
+                from_number=twilio_phone,
+                base_url=call_base_url,
             )
             agent.tools.register(twilio_call_tool)
-            logger.info("📞 TwilioCallTool registered")
+            if twilio_call_tool.elevenlabs_enabled:
+                logger.info(f"📞 TwilioCallTool registered (ElevenLabs + Google Journey fallback)")
+            else:
+                logger.info(f"📞 TwilioCallTool registered (Google Journey voice)")
 
         # Register ContactsTool (persistent contacts in DigitalCloneBrain)
         from src.core.tools.contacts import ContactsTool

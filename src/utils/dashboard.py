@@ -161,6 +161,23 @@ class Dashboard:
             twiml = await self.twilio_whatsapp_chat.handle_webhook(form_data)
             return Response(content=twiml, media_type="text/xml")
 
+        @app.get("/audio/{filename}")
+        async def serve_audio(filename: str):
+            """Serve generated audio files (ElevenLabs TTS) for Twilio <Play>."""
+            from fastapi.responses import FileResponse
+            from pathlib import Path
+            import re
+
+            # Security: only allow alphanumeric filenames with .mp3 extension
+            if not re.match(r'^[a-f0-9]+\.mp3$', filename):
+                return self.JSONResponse({"error": "Invalid filename"}, status_code=400)
+
+            filepath = Path("/tmp/nova_audio") / filename
+            if not filepath.exists():
+                return self.JSONResponse({"error": "Not found"}, status_code=404)
+
+            return FileResponse(filepath, media_type="audio/mpeg")
+
         @app.post("/twilio/voice")
         async def twilio_voice_webhook(request: Request):
             """Handle incoming Twilio Voice call (POST)."""
