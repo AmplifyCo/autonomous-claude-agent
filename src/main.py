@@ -177,6 +177,18 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             agent.tools.register(twilio_whatsapp_tool)
             logger.info("📱 TwilioWhatsAppTool registered")
 
+        # Register TwilioCallTool (outbound voice calls)
+        twilio_phone = config.twilio_phone_number
+        if config.twilio_account_sid and config.twilio_auth_token and twilio_phone:
+            from src.core.tools.twilio_call import TwilioCallTool
+            twilio_call_tool = TwilioCallTool(
+                account_sid=config.twilio_account_sid,
+                auth_token=config.twilio_auth_token,
+                from_number=twilio_phone
+            )
+            agent.tools.register(twilio_call_tool)
+            logger.info("📞 TwilioCallTool registered")
+
         # Register ContactsTool (persistent contacts in DigitalCloneBrain)
         from src.core.tools.contacts import ContactsTool
         contacts_tool = ContactsTool(digital_brain=digital_brain)
