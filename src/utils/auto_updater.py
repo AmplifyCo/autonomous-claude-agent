@@ -246,7 +246,7 @@ class AutoUpdater:
 
             # Restart via systemd
             result = await self.bash_tool.execute(
-                "sudo systemctl restart claude-agent",
+                "sudo systemctl restart digital-twin",
                 timeout=30
             )
 
