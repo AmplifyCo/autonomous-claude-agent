@@ -1,1 +1,0 @@
-0 * * * * /Users/srinath/Desktop/DIGITAL_CLONE/digital-twin/auto-update.sh >> /Users/srinath/Desktop/DIGITAL_CLONE/digital-twin/logs/cron.log 2>&1

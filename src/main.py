@@ -374,7 +374,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                     account_sid=config.twilio_account_sid,
                     auth_token=config.twilio_auth_token,
                     phone_number=config.twilio_phone_number,
-                    conversation_manager=conversation_manager
+                    conversation_manager=conversation_manager,
+                    twilio_call_tool=twilio_call_tool if 'twilio_call_tool' in locals() else None
                 )
                 # Register with dashboard
                 if dashboard.enabled:

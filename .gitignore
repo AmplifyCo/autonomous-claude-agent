@@ -1,3 +1,6 @@
+#ssh key
+DigitalClone.pem
+
 # Data directories (brain, logs, credentials)
 data/
 !data/core_brain_snapshot.json

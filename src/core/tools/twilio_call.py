@@ -150,7 +150,7 @@ class TwilioCallTool(BaseTool):
             return None
 
     def _build_twiml_play(self, audio_url: str) -> str:
-        """Build TwiML that plays a pre-generated audio file.
+        """Build TwiML that plays a pre-generated audio file and starts listening.
 
         Args:
             audio_url: Public URL to the audio file
@@ -161,16 +161,14 @@ class TwilioCallTool(BaseTool):
         return (
             '<?xml version="1.0" encoding="UTF-8"?>'
             "<Response>"
+            '<Gather input="speech" action="/twilio/voice/gather" speechTimeout="auto" language="en-US">'
             f"<Play>{escape(audio_url)}</Play>"
-            '<Pause length="1"/>'
-            '<Say voice="Google.en-US-Journey-F" language="en-US">'
-            "If you would like to respond, please send a message. Goodbye!"
-            "</Say>"
+            "</Gather>"
             "</Response>"
         )
 
     def _build_twiml_say(self, message: str, voice_key: str = "female") -> str:
-        """Build TwiML with Google Journey voice (fallback).
+        """Build TwiML with Google Journey voice (fallback) and starts listening.
 
         Args:
             message: Text to speak
@@ -185,11 +183,9 @@ class TwilioCallTool(BaseTool):
         return (
             '<?xml version="1.0" encoding="UTF-8"?>'
             "<Response>"
+            '<Gather input="speech" action="/twilio/voice/gather" speechTimeout="auto" language="en-US">'
             f'<Say voice="{voice}" language="en-US">{safe_message}</Say>'
-            '<Pause length="1"/>'
-            f'<Say voice="{voice}" language="en-US">'
-            "If you would like to respond, please send a message. Goodbye!"
-            "</Say>"
+            "</Gather>"
             "</Response>"
         )
 
@@ -246,6 +242,7 @@ class TwilioCallTool(BaseTool):
         try:
             logger.info(f"📞 Making outbound call to {to_number} (voice: {voice_used})")
 
+            # Outbound API calls pass 'To' to the webhook in the subsequent `/twilio/voice/gather` steps 
             call = self.client.calls.create(
                 twiml=twiml,
                 to=to_number,
@@ -255,7 +252,7 @@ class TwilioCallTool(BaseTool):
             logger.info(f"📞 Call initiated: SID={call.sid}, status={call.status}")
 
             return ToolResult(
-                output=f"Call initiated to {to_number} (SID: {call.sid}, voice: {voice_used})",
+                output=f"Call initiated to {to_number} (SID: {call.sid}, voice: {voice_used}). The recipient will be able to reply which you can handle via subsequent voice messages.",
                 success=True,
                 data={"call_sid": call.sid, "status": call.status, "voice": voice_used}
             )
@@ -267,3 +264,4 @@ class TwilioCallTool(BaseTool):
                 error=error_msg,
                 success=False
             )
+
