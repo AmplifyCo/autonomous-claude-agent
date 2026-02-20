@@ -262,9 +262,9 @@ class AutonomousAgent:
                     system=system_prompt, max_tokens=max_tokens
                 )
             except Exception as e:
-                logger.warning(f"Gemini Flash failed ({str(e)[:60]}), trying fallback...")
+                logger.warning(f"Gemini Flash failed ({str(e)[:60]}), trying fallback to Gemini Pro...")
                 return await self.gemini_client.create_message(
-                    model=self.config.subagent_model,
+                    model=self.MODEL_GEMINI_PRO,
                     messages=messages, tools=tools,
                     system=system_prompt, max_tokens=max_tokens
                 )
