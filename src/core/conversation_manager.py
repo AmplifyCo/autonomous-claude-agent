@@ -758,10 +758,12 @@ class ConversationManager:
                     max_iterations=5,
                     system_prompt=None  # Let agent build standard prompt with tools
                 )
+
+                # Only add suffix if we fell back from a different model
+                if "gemini" not in self.agent.config.default_model:
+                    response_text += "\n_(using Gemini Flash)_"
                 
-                # error_type = "Rate limit" if "429" in str(error) else "API issue"
-                # warning = f"⚠️ *{error_type}* — using Gemini Flash fallback\n\n---\n"
-                return response_text + "\n_(using Gemini Flash)_"
+                return response_text
             except Exception as gemini_error:
                 logger.error(f"Gemini fallback also failed: {gemini_error}")
                 # Fall through to local model
