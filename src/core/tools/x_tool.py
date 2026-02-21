@@ -27,8 +27,8 @@ class XTool(BaseTool):
     parameters = {
         "operation": {
             "type": "string",
-            "description": "Operation: 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', or 'follow_user'",
-            "enum": ["post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user"]
+            "description": "Operation: 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', 'follow_user', or 'save_community'",
+            "enum": ["post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user", "save_community"]
         },
         "content": {
             "type": "string",
@@ -40,7 +40,11 @@ class XTool(BaseTool):
         },
         "community_id": {
             "type": "string",
-            "description": "Community name (e.g. 'Build In Public') or numeric ID (for post_to_community or quote_tweet)"
+            "description": "Community name (e.g. 'Build In Public') or numeric ID (for post_to_community, quote_tweet, or save_community)"
+        },
+        "community_name": {
+            "type": "string",
+            "description": "Human-readable community name to associate with the ID (for save_community)"
         },
         "quote_tweet_id": {
             "type": "string",
@@ -78,6 +82,17 @@ class XTool(BaseTool):
         self.communities_cache_file = self.data_dir / "x_communities.json"
         self.user_cache_file = self.data_dir / "x_user_cache.json"
 
+        # Pre-seed cache from env vars (X_COMMUNITY_ID + X_COMMUNITY_NAME)
+        # This lets users avoid the API lookup entirely for their main community
+        import os
+        default_community_id = os.getenv("X_COMMUNITY_ID", "").strip()
+        default_community_name = os.getenv("X_COMMUNITY_NAME", "").strip()
+        if default_community_id and default_community_name:
+            cache = self._load_community_cache()
+            cache[default_community_name.lower().strip()] = default_community_id
+            self._save_community_cache(cache)
+            logger.info(f"X community pre-seeded from env: '{default_community_name}' → {default_community_id}")
+
     def to_anthropic_tool(self) -> Dict[str, Any]:
         """Override to make only 'operation' required."""
         return {
@@ -106,6 +121,7 @@ class XTool(BaseTool):
         content: Optional[str] = None,
         tweet_id: Optional[str] = None,
         community_id: Optional[str] = None,
+        community_name: Optional[str] = None,
         target_username: Optional[str] = None,
         **kwargs
     ) -> ToolResult:
@@ -120,10 +136,12 @@ class XTool(BaseTool):
             elif operation == "retweet":
                 return await self._retweet(tweet_id)
             elif operation == "quote_tweet":
-                content = content or ""  # Content is optional for quote? No, usually required. But if empty, standard quote.
+                content = content or ""
                 return await self._quote_tweet(tweet_id, content, community_id)
             elif operation == "follow_user":
                 return await self._follow_user(target_username)
+            elif operation == "save_community":
+                return await self._save_community(community_name, community_id)
             else:
                 return ToolResult(
                     success=False,
@@ -201,8 +219,13 @@ class XTool(BaseTool):
         if not resolved_id:
             return ToolResult(
                 success=False,
-                error=f"Could not find community: '{community_id}'. "
-                       "Try using the numeric community ID directly."
+                error=(
+                    f"Could not find community '{community_id}' — the X API community search "
+                    f"may not be available at this API tier. "
+                    f"Please ask the user for the numeric community ID, then call "
+                    f"save_community(community_name='{community_id}', community_id=<ID>) "
+                    f"to cache it so you never need to ask again."
+                )
             )
 
         def _do_post():
@@ -266,7 +289,7 @@ class XTool(BaseTool):
             resp = await loop.run_in_executor(None, _do_search)
 
             if resp.status_code != 200:
-                logger.warning(f"Community search failed ({resp.status_code}): {resp.text}")
+                logger.warning(f"Community search API failed ({resp.status_code}) — X API may not support community search at this tier. Use save_community to cache the ID manually.")
                 return None
 
             data = resp.json()
@@ -301,6 +324,36 @@ class XTool(BaseTool):
         except Exception as e:
             logger.error(f"Community search error: {e}")
             return None
+
+    async def _save_community(
+        self,
+        community_name: Optional[str],
+        community_id: Optional[str]
+    ) -> ToolResult:
+        """Save a community name → ID mapping to the cache."""
+        if not community_name or not community_id:
+            return ToolResult(
+                success=False,
+                error="Both community_name and community_id are required for save_community"
+            )
+
+        if not community_id.strip().isdigit():
+            return ToolResult(
+                success=False,
+                error=f"community_id must be a numeric ID (e.g. '1234567890123456789'), got: '{community_id}'"
+            )
+
+        cache = self._load_community_cache()
+        key = community_name.lower().strip()
+        cache[key] = community_id.strip()
+        self._save_community_cache(cache)
+
+        logger.info(f"Community saved: '{community_name}' → {community_id}")
+        return ToolResult(
+            success=True,
+            output=f"Community saved: '{community_name}' → ID {community_id}. Future posts to this community will work automatically.",
+            metadata={"community_name": community_name, "community_id": community_id}
+        )
 
     def _load_community_cache(self) -> Dict[str, str]:
         """Load community name → ID cache from JSON file."""
@@ -414,9 +467,12 @@ class XTool(BaseTool):
         if community_id:
             resolved_community_id = await self._resolve_community_id(community_id)
             if not resolved_community_id:
-                 return ToolResult(
+                return ToolResult(
                     success=False,
-                    error=f"Could not resolve community: {community_id}"
+                    error=(
+                        f"Could not find community '{community_id}'. "
+                        f"Use save_community(community_name='{community_id}', community_id=<numeric ID>) to cache it."
+                    )
                 )
             payload["community_id"] = resolved_community_id
 
