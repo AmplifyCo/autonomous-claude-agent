@@ -44,41 +44,47 @@ python -m venv venv
 source venv/bin/activate
 
 pip install -r requirements.txt
-
-cp .env.example .env
 ```
 
-### Configuration
+### Setup wizard
 
-Edit `.env` with your credentials. Nova works with any of the supported LLM providers — configure whichever you have access to:
+Run the interactive setup wizard. It guides you through everything — including a live conversation with Nova right in your terminal:
+
+```bash
+python setup.py
+```
+
+The wizard will:
+1. Ask you to pick an LLM provider (SmolLM2 locally via Ollama, Claude, Gemini, OpenAI, or any compatible endpoint)
+2. Test your connection immediately
+3. Walk you through Telegram setup (required)
+4. Let **Nova's setup persona** guide the rest — ask what you want to do, and it recommends which features to configure (email, WhatsApp, X, calendar, voice)
+
+> **No API key? No problem.** Select SmolLM2 (option 1) to run the entire wizard locally using [Ollama](https://ollama.com) — then add a cloud key for Nova's day-to-day use.
+
+### Manual configuration
+
+If you prefer to edit `.env` directly, copy the example and fill in your values:
+
+```bash
+cp .env.example .env
+nano .env    # or your editor of choice
+```
+
+Nova works with any supported LLM provider — configure whichever you have access to:
 
 ```bash
 # LLM Provider — configure one or more
-ANTHROPIC_API_KEY=your_anthropic_key        # Claude (claude-sonnet, claude-haiku, ...)
-GEMINI_API_KEY=your_gemini_key              # Gemini (gemini-2.0-flash, gemini-pro, ...)
-OPENAI_API_KEY=your_openai_key              # OpenAI-compatible endpoints
+ANTHROPIC_API_KEY=your_key    # Claude (claude-sonnet, claude-haiku, ...)
+GEMINI_API_KEY=your_key       # Gemini (gemini-2.0-flash, ...)
+OPENAI_API_KEY=your_key       # OpenAI-compatible endpoints
 
 # Telegram (required)
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
-
-# Optional — enable talents as needed
-EMAIL_ADDRESS=you@example.com
-EMAIL_PASSWORD=your_app_password
-EMAIL_IMAP_SERVER=imap.gmail.com
-EMAIL_SMTP_SERVER=smtp.gmail.com
-
-CALDAV_URL=your_caldav_url
-CALDAV_USERNAME=your_username
-CALDAV_PASSWORD=your_password
-
-X_API_KEY=your_x_api_key
-X_API_SECRET=your_x_api_secret
-X_ACCESS_TOKEN=your_x_access_token
-X_ACCESS_TOKEN_SECRET=your_x_access_token_secret
 ```
 
-Nova routes tasks to the best available model automatically — fast models for quick responses, smarter models for complex reasoning — and falls back gracefully when a provider is unavailable.
+Nova routes tasks to the best available model automatically and falls back gracefully when a provider is unavailable.
 
 ### Run
 
