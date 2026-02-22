@@ -148,21 +148,21 @@ class DigitalCloneBrain:
             logger.warning(f"Failed to write JSONL backup: {e}")
 
     def _auto_restore_from_backup(self):
-        """Restore brain data from JSONL backup if ChromaDB collections were wiped."""
+        """Restore brain data from JSONL backup if LanceDB collections are empty."""
         if not self._backup_file.exists():
             return
 
-        # Check if ChromaDB has data
+        # Check if LanceDB has data
         identity_count = self.identity.count()
         prefs_count = self.preferences.count()
         contacts_count = self.contacts.count()
 
         if identity_count > 0 and prefs_count > 0:
-            logger.info(f"ChromaDB has data (identity={identity_count}, prefs={prefs_count}, contacts={contacts_count}), skipping restore")
+            logger.info(f"LanceDB has data (identity={identity_count}, prefs={prefs_count}, contacts={contacts_count}), skipping restore")
             return
 
-        # ChromaDB is empty — restore from backup
-        logger.info("ChromaDB appears empty, restoring from JSONL backup...")
+        # LanceDB is empty — restore from backup
+        logger.info("LanceDB appears empty, restoring from JSONL backup...")
         restored = {"identity": 0, "preference": 0, "contact": 0}
 
         try:
@@ -180,20 +180,14 @@ class DigitalCloneBrain:
                             text = record.get("text", "")
                             metadata = record.get("metadata", {})
                             if text:
-                                import asyncio
-                                asyncio.get_event_loop().run_until_complete(
-                                    self.identity.store(text=text, metadata=metadata, doc_id=doc_id)
-                                )
+                                self.identity.store_sync(text=text, metadata=metadata, doc_id=doc_id)
                                 restored["identity"] += 1
 
                         elif rtype == "preference":
                             text = record.get("text", "")
                             metadata = record.get("metadata", {})
                             if text:
-                                import asyncio
-                                asyncio.get_event_loop().run_until_complete(
-                                    self.preferences.store(text=text, metadata=metadata)
-                                )
+                                self.preferences.store_sync(text=text, metadata=metadata)
                                 restored["preference"] += 1
 
                         elif rtype == "contact":
@@ -201,10 +195,7 @@ class DigitalCloneBrain:
                             metadata = record.get("metadata", {})
                             doc_id = record.get("doc_id")
                             if text:
-                                import asyncio
-                                asyncio.get_event_loop().run_until_complete(
-                                    self.contacts.store(text=text, metadata=metadata, doc_id=doc_id)
-                                )
+                                self.contacts.store_sync(text=text, metadata=metadata, doc_id=doc_id)
                                 restored["contact"] += 1
 
                     except json.JSONDecodeError:

@@ -215,6 +215,29 @@ class VectorDatabase:
         except Exception as e:
             logger.warning(f"LanceDB delete failed: {e}")
 
+    def store_sync(
+        self,
+        text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        doc_id: Optional[str] = None
+    ) -> str:
+        """Synchronous version of store() — safe to call from __init__ or non-async contexts.
+
+        Used by _auto_restore_from_backup() which runs before the event loop is available.
+        """
+        if not doc_id:
+            doc_id = str(uuid.uuid4())
+        vector = self._embed(text)
+        meta_json = json.dumps(metadata or {}, ensure_ascii=False)
+        record = {"id": doc_id, "text": text, "metadata": meta_json, "vector": vector}
+        try:
+            self._upsert(record, doc_id)
+        except Exception as e:
+            logger.error(f"LanceDB store_sync failed: {e}")
+            raise
+        logger.debug(f"Stored document (sync) {doc_id}")
+        return doc_id
+
     def clear(self):
         """Clear all documents from table."""
         try:
