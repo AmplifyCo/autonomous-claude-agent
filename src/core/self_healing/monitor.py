@@ -244,6 +244,17 @@ Monitoring and will attempt auto-fix if possible.
                 if not gap:
                     continue
 
+                # ── Loop prevention ───────────────────────────────────────
+                # Skip if a fix is already in a branch (awaiting review/merge).
+                # Without this check, the auto-fixer would re-trigger every cycle
+                # because the unmerged branch doesn't change EC2's running code.
+                if self.response_interceptor.is_gap_already_tracked(gap.gap_description):
+                    logger.info(
+                        f"⏭️ Gap already tracked (fix pending or in-progress), "
+                        f"skipping: {gap.gap_description}"
+                    )
+                    continue
+
                 # Add to backlog
                 self.response_interceptor.add_to_backlog(gap)
 
@@ -265,8 +276,13 @@ Monitoring and will attempt auto-fix if possible.
 
                         backlog_idx = len(self.response_interceptor._load_backlog()) - 1
                         if result.success:
+                            # Mark as fix_pending (not "fixed") — the patch lives in a
+                            # git branch and hasn't been merged to main yet. This status
+                            # is what prevents the loop: is_gap_already_tracked() will
+                            # skip this gap until the branch is merged and the gap
+                            # naturally disappears from logs.
                             self.response_interceptor.update_backlog_item(
-                                backlog_idx, "fixed", result.details
+                                backlog_idx, "fix_pending", result.action_taken
                             )
                             await self._notify_capability_added(gap, result)
                         else:
@@ -280,19 +296,19 @@ Monitoring and will attempt auto-fix if possible.
             logger.error(f"Error during capability gap scan: {e}", exc_info=True)
 
     async def _notify_capability_added(self, gap, result):
-        """Notify user via Telegram that a new capability was added."""
+        """Notify user via Telegram that a new capability fix was pushed to a branch."""
         if not self.telegram:
             return
 
-        message = f"""✨ **New Capability Learned**
+        message = f"""🌿 **Capability Fix Ready for Review**
 
 **Gap:** {gap.gap_description}
 **Tool:** `{gap.likely_tool}`
 **Original request:** {gap.original_task[:100]}
-**Fix:** {result.action_taken}
+**Action:** {result.action_taken}
 
-I can now do this! Want me to try again?
-⚠️ Service restart needed to activate: `sudo systemctl restart digital-twin`"""
+Fix is in a git branch — review and merge to activate.
+Once merged, restart: `sudo systemctl restart digital-twin`"""
 
         await self.telegram.notify(message)
 

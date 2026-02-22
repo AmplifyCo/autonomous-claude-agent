@@ -44,6 +44,32 @@ FALSE_POSITIVE_PATTERNS = [
 ]
 
 
+def _descriptions_overlap(a: str, b: str, threshold: float = 0.6) -> bool:
+    """Return True if two gap descriptions share enough words to be the same gap.
+
+    Uses word-overlap ratio relative to the shorter description.
+
+    Args:
+        a: First description (lowercase)
+        b: Second description (lowercase)
+        threshold: Minimum overlap ratio to consider them the same
+
+    Returns:
+        True if descriptions overlap beyond threshold
+    """
+    words_a = set(a.split())
+    words_b = set(b.split())
+    # Remove common stop words to avoid false matches on "the", "a", "to", etc.
+    stop = {"the", "a", "an", "to", "of", "in", "for", "and", "or", "is", "be", "can"}
+    words_a -= stop
+    words_b -= stop
+    if not words_a or not words_b:
+        return a == b  # fallback: exact match
+    smaller = min(len(words_a), len(words_b))
+    overlap = len(words_a & words_b) / smaller
+    return overlap >= threshold
+
+
 @dataclass
 class InabilityGap:
     """A detected capability gap."""
@@ -317,6 +343,35 @@ Reply with ONLY the JSON, no other text."""
         backlog = self._load_backlog()
         return [item for item in backlog if item.get("status") == "pending"]
 
+    def is_gap_already_tracked(self, gap_description: str) -> bool:
+        """Check if a gap with a similar description is already in the backlog.
+
+        Prevents re-triggering the auto-fixer for the same capability gap
+        when a fix branch has been pushed but not yet merged to main.
+
+        Args:
+            gap_description: The new gap description to check
+
+        Returns:
+            True if a similar gap is already being tracked (status != failed)
+        """
+        backlog = self._load_backlog()
+        new_desc = gap_description.lower().strip()
+
+        for item in backlog:
+            # Allow re-trying failed fixes, but skip all others
+            if item.get("status") == "failed":
+                continue
+            existing_desc = item.get("gap_description", "").lower().strip()
+            if _descriptions_overlap(new_desc, existing_desc):
+                logger.info(
+                    f"Gap '{gap_description[:60]}' matches existing entry "
+                    f"(status={item.get('status')})"
+                )
+                return True
+
+        return False
+
     def get_backlog_summary(self) -> str:
         """Get a summary of the capability backlog for daily updates.
 
@@ -329,6 +384,7 @@ Reply with ONLY the JSON, no other text."""
 
         pending = [i for i in backlog if i.get("status") == "pending"]
         fixing = [i for i in backlog if i.get("status") == "fixing"]
+        fix_pending = [i for i in backlog if i.get("status") == "fix_pending"]
         fixed = [i for i in backlog if i.get("status") == "fixed"]
         failed = [i for i in backlog if i.get("status") == "failed"]
 
@@ -341,12 +397,19 @@ Reply with ONLY the JSON, no other text."""
                 lines.append(f"  • Add `{item.get('gap_description', '?')}` to `{tool}`")
 
         if fixing:
-            lines.append(f"\n🔧 **In Progress** ({len(fixing)}):")
+            lines.append(f"\n🔧 **Generating Fix** ({len(fixing)}):")
             for item in fixing:
                 lines.append(f"  • {item.get('gap_description', '?')}")
 
+        if fix_pending:
+            lines.append(f"\n🌿 **Fix in Branch — Awaiting Merge** ({len(fix_pending)}):")
+            for item in fix_pending:
+                branch = item.get('fix_details', 'unknown branch')
+                lines.append(f"  • {item.get('gap_description', '?')}")
+                lines.append(f"    ↳ {branch}")
+
         if fixed:
-            lines.append(f"\n✅ **Fixed** ({len(fixed)}):")
+            lines.append(f"\n✅ **Fixed & Merged** ({len(fixed)}):")
             for item in fixed[-5:]:  # Last 5
                 lines.append(f"  • {item.get('gap_description', '?')}")
 
