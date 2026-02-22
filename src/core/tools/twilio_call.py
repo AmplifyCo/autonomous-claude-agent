@@ -63,13 +63,12 @@ class TwilioCallTool(BaseTool):
         "male": "Google.en-US-Journey-D",
     }
 
-    # ElevenLabs voice IDs — primary (premium, ultra-natural)
-    # Default to user-selected female voice (ZMjpsMpqgbzz3erSa285) if env not set
-    _default_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "ZMjpsMpqgbzz3erSa285")
+    # ElevenLabs voice IDs — always read from ELEVENLABS_VOICE_ID in .env (no hardcoded fallback)
+    _default_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "")
 
     ELEVENLABS_VOICES = {
         "female": _default_voice_id,
-        "male": _default_voice_id,      # Use the same default for all unless specified
+        "male": _default_voice_id,
     }
 
     def __init__(
