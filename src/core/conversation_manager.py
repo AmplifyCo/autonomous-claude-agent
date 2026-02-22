@@ -45,6 +45,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from src.core.security.llm_security import LLMSecurityGuard
+from src.core.brain.working_memory import WorkingMemory
+from src.core.brain import tone_analyzer as _tone_analyzer
+from src.core.brain.episodic_memory import EpisodicMemory
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +157,11 @@ class ConversationManager:
 
         # Task queue for background autonomous execution (injected by main.py)
         self.task_queue = None
+
+        # ── AGI/Human-like capabilities (injected by main.py) ────────────────
+        self.working_memory: Optional[WorkingMemory] = None   # session state, tone, unfinished items
+        self.episodic_memory: Optional[EpisodicMemory] = None  # event-outcome history for learning
+        self._current_tone_signal = None  # set per-message by tone analyzer
 
         # Context Thalamus: token budgeting and history management
         from src.core.context_thalamus import ContextThalamus
@@ -561,6 +569,21 @@ class ConversationManager:
             # Use sanitized message for processing
             message = sanitized_message
 
+            # ── Tone detection (zero-latency, rule-based) ─────────────────
+            self._current_tone_signal = _tone_analyzer.analyze(message)
+            logger.debug(f"Tone: {self._current_tone_signal.register} (urgency={self._current_tone_signal.urgency:.1f})")
+
+            # ── Interrupt detection: STOP / CANCEL background tasks ───────
+            interrupt_response = self._handle_task_interrupt(message)
+            if interrupt_response:
+                logger.info(f"[{trace_id}] Task interrupt handled")
+                return interrupt_response
+
+            # ── Behavioral calibration detection ─────────────────────────
+            # e.g. "be more concise", "be more formal", "stop being verbose"
+            if self.working_memory:
+                self._detect_and_store_calibration(message)
+
             # Try primary processing with Claude API
             logger.info(f"[{trace_id}] Routing to model...")
             response = await self._process_with_fallback(message)
@@ -615,6 +638,18 @@ class ConversationManager:
 
             # Persist to daily log file (chronological, survives restarts)
             self._save_to_daily_log(turn)
+
+            # ── Update working memory (tone, momentum, unfinished items) ──
+            if self.working_memory:
+                tone_register = (
+                    self._current_tone_signal.register
+                    if self._current_tone_signal else "neutral"
+                )
+                self.working_memory.update(
+                    user_message=message,
+                    response=filtered_response,
+                    detected_tone=tone_register,
+                )
 
             # Keep full last response for "yes"/"do it" understanding
             self._last_bot_response = filtered_response
@@ -1607,6 +1642,90 @@ Examples:
         "scan all", "read all", "summarize everything", "report on",
         "what are people saying", "what does x say", "gather info",
     ])
+    # ── Interrupt mechanism: stop/cancel background tasks mid-execution ──────
+    # Specific patterns that mean "stop the current background task"
+    _TASK_INTERRUPT_PATTERNS = [
+        r"\bstop (the |current |background |that |this )?task\b",
+        r"\bcancel (the |current |background |that |this )?task\b",
+        r"\babort (the |current |background |that |this )?task\b",
+        r"\bstop what you'?re? doing\b",
+        r"\bcancel all tasks\b",
+        r"\bstop everything\b",
+        r"\bcancel everything\b",
+        r"\bfocus on something else\b",
+    ]
+
+    def _handle_task_interrupt(self, message: str) -> Optional[str]:
+        """Check if message is a task interrupt command.
+
+        Only activates when there are pending/running tasks. Returns a response
+        string if interrupt was handled, None otherwise.
+        """
+        if not self.task_queue:
+            return None
+
+        # Only check if there are active tasks (avoids false positives)
+        pending = self.task_queue.get_pending_count()
+        if pending == 0:
+            return None
+
+        msg_lower = message.lower().strip()
+        is_interrupt = any(
+            re.search(p, msg_lower, re.IGNORECASE)
+            for p in self._TASK_INTERRUPT_PATTERNS
+        )
+        if not is_interrupt:
+            return None
+
+        # Cancel all pending/running tasks
+        tasks = self.task_queue.get_recent_tasks(limit=20)
+        cancelled_goals = []
+        for t in tasks:
+            if t.status in ("pending", "decomposing", "running"):
+                self.task_queue.cancel(t.id)
+                cancelled_goals.append(t.goal[:60])
+
+        if not cancelled_goals:
+            return None
+
+        logger.info(f"Task interrupt: cancelled {len(cancelled_goals)} task(s)")
+
+        # Add to unfinished so Nova remembers what was interrupted
+        if self.working_memory and cancelled_goals:
+            self.working_memory.add_unfinished(f"Interrupted: {cancelled_goals[0]}")
+
+        count = len(cancelled_goals)
+        return (
+            f"Stopped — I've cancelled {count} background task(s). "
+            f"What would you like me to focus on instead?"
+        )
+
+    # ── Behavioral calibration detection ─────────────────────────────────────
+    _CALIBRATION_PATTERNS = [
+        r"\bbe (more |less )?(concise|brief|short|verbose|detailed|formal|casual|direct)\b",
+        r"\bstop being (so )?(verbose|wordy|long-winded|formal|casual)\b",
+        r"\bkeep (it |your answers |replies )?(shorter|brief|concise)\b",
+        r"\bgive (me |us )?(more |less )?(detail|context|information)\b",
+        r"\buse (simpler|plainer|more formal) (language|words|tone)\b",
+        r"\bspeak (more )?(formally|casually|directly|simply)\b",
+    ]
+
+    def _detect_and_store_calibration(self, message: str):
+        """Detect and persist behavioral calibration directives from the user.
+
+        e.g. 'be more concise', 'be more formal', 'stop being verbose'
+        """
+        if not self.working_memory:
+            return
+        msg_lower = message.lower().strip()
+        for p in self._CALIBRATION_PATTERNS:
+            if re.search(p, msg_lower, re.IGNORECASE):
+                # Store the raw directive (trimmed)
+                directive = message.strip()[:200]
+                self.working_memory.set_calibration(directive)
+                logger.info(f"Calibration stored: {directive[:60]}")
+                break
+
     # Actions that should always go to background
     _BG_ACTIONS = frozenset(["research", "gather", "compile", "monitor", "survey"])
     # Tool count threshold: if 3+ distinct tools are needed, background it
@@ -2075,7 +2194,14 @@ SECURITY OVERRIDE:
         if brain_context:
             brain_context = self.thalamus.budget_brain_context(brain_context)
 
-        return base_prompt + brain_context
+        # ── Working memory context (tone, unfinished items, calibration) ─
+        wm_section = ""
+        if self.working_memory:
+            wm_ctx = self.working_memory.get_context()
+            if wm_ctx:
+                wm_section = f"\n\n{wm_ctx}"
+
+        return base_prompt + brain_context + wm_section
 
     # ========================================================================
     # Intent Handlers

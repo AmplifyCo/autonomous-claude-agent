@@ -22,6 +22,9 @@ from src.core.conversation_manager import ConversationManager
 from src.core.task_queue import TaskQueue
 from src.core.goal_decomposer import GoalDecomposer
 from src.core.task_runner import TaskRunner
+from src.core.brain.working_memory import WorkingMemory
+from src.core.brain.episodic_memory import EpisodicMemory
+from src.core.brain.attention_engine import AttentionEngine
 from src.integrations.anthropic_client import AnthropicClient
 from src.integrations.model_router import ModelRouter
 from src.channels.telegram_channel import TelegramChannel
@@ -380,6 +383,13 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             # Wire task_queue into the NovaTaskTool in agent's registry
             agent.tools.set_task_queue(task_queue)
 
+            # ── AGI/Human-like capabilities ───────────────────────────────
+            working_memory = WorkingMemory(path="./data/working_memory.json")
+            episodic_memory = EpisodicMemory(path="./data/episodic_memory")
+            conversation_manager.working_memory = working_memory
+            conversation_manager.episodic_memory = episodic_memory
+            logger.info("🧠 WorkingMemory + EpisodicMemory wired into ConversationManager")
+
             logger.info("✅ Autonomy stack initialized")
 
             # Initialize TelegramChannel (thin transport wrapper)
@@ -459,6 +469,17 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         )
         asyncio.create_task(_task_runner.start())
         logger.info("🚀 Background TaskRunner started")
+
+        # Start AttentionEngine (proactive observations every 6h)
+        _gemini_for_attention = gemini_client if 'gemini_client' in locals() else None
+        _attention_engine = AttentionEngine(
+            digital_brain=digital_brain,
+            llm_client=_gemini_for_attention,
+            telegram_notifier=telegram,
+            owner_name=config.owner_name,
+        )
+        attention_task = asyncio.create_task(_attention_engine.start())
+        logger.info("🔍 AttentionEngine started (proactive observations every 6h)")
 
         # Show Telegram info
         if telegram.enabled:
@@ -548,6 +569,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 auto_update_task.cancel()
             if dashboard_task:
                 dashboard_task.cancel()
+            if 'attention_task' in locals() and attention_task:
+                attention_task.cancel()
             await telegram.notify("Agent shutting down", level="warning")
 
     except Exception as e:
