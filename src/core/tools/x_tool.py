@@ -20,16 +20,17 @@ class XTool(BaseTool):
 
     name = "x_tool"
     description = (
-        "Tool to interact with X (Twitter) — search, post, retweet, and manage communities. "
+        "Tool to interact with X (Twitter) — search, post, retweet, look up profiles, and manage communities. "
         "Use 'search_tweets' to find X posts/discussions on any topic (no API tier restriction — uses DuckDuckGo). "
+        "Use 'lookup_user' to get a specific X handle's profile: bio, follower count, tweet count. "
         "Use 'post_tweet' or 'post_to_community' to publish content. "
-        "Use when: researching X opinions, posting updates, or engaging with X communities."
+        "Use when: researching X opinions, checking someone's X profile, posting updates, or engaging with X communities."
     )
     parameters = {
         "operation": {
             "type": "string",
-            "description": "Operation: 'search_tweets', 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', 'follow_user', or 'save_community'",
-            "enum": ["search_tweets", "post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user", "save_community"]
+            "description": "Operation: 'search_tweets', 'lookup_user', 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', 'follow_user', or 'save_community'",
+            "enum": ["search_tweets", "lookup_user", "post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user", "save_community"]
         },
         "content": {
             "type": "string",
@@ -53,7 +54,7 @@ class XTool(BaseTool):
         },
         "target_username": {
             "type": "string",
-            "description": "X username to follow, excluding the @ symbol (e.g., 'elonmusk' or 'xdevelopers', for follow_user)"
+            "description": "X username (handle) without the @ symbol (e.g., 'elonmusk'). Used for follow_user and lookup_user."
         },
         "query": {
             "type": "string",
@@ -140,6 +141,8 @@ class XTool(BaseTool):
         try:
             if operation == "search_tweets":
                 return await self._search_tweets(query, max_results)
+            elif operation == "lookup_user":
+                return await self._lookup_user(target_username)
             elif operation == "post_tweet":
                 return await self._post_tweet(content)
             elif operation == "delete_tweet":
@@ -256,6 +259,68 @@ class XTool(BaseTool):
             success=True,
             output=formatted.strip(),
             metadata={"results": results, "query": query, "count": len(results)}
+        )
+
+    async def _lookup_user(self, username: Optional[str]) -> ToolResult:
+        """Look up an X user's profile by handle (Free tier API).
+
+        Returns name, bio, follower/following counts, tweet count, and
+        whether the account is verified. Works without any paid API tier.
+        """
+        import asyncio
+
+        if not username:
+            return ToolResult(success=False, error="target_username is required for lookup_user")
+
+        safe_username = username.strip().lstrip("@")
+
+        def _fetch():
+            oauth = self._get_oauth1_session()
+            return oauth.get(
+                f"{self.api_base}/users/by/username/{safe_username}",
+                params={
+                    "user.fields": "name,description,public_metrics,created_at,verified,verified_type,location,url,profile_image_url"
+                }
+            )
+
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, _fetch)
+
+        if resp.status_code != 200:
+            return self._handle_error(resp)
+
+        data = resp.json().get("data", {})
+        if not data:
+            return ToolResult(success=False, error=f"No X user found for @{safe_username}")
+
+        metrics = data.get("public_metrics", {})
+        verified = data.get("verified") or data.get("verified_type") not in (None, "none")
+        lines = [
+            f"@{safe_username} — {data.get('name', '')}",
+            f"Bio: {data.get('description', '(no bio)')}",
+            f"Followers: {metrics.get('followers_count', 'N/A'):,}  Following: {metrics.get('following_count', 'N/A'):,}  Tweets: {metrics.get('tweet_count', 'N/A'):,}",
+        ]
+        if data.get("location"):
+            lines.append(f"Location: {data['location']}")
+        if verified:
+            lines.append("Verified: Yes")
+        if data.get("created_at"):
+            lines.append(f"Joined: {data['created_at'][:10]}")
+        lines.append(f"Profile: https://x.com/{safe_username}")
+
+        logger.info(f"Looked up X user: @{safe_username}")
+        return ToolResult(
+            success=True,
+            output="\n".join(lines),
+            metadata={
+                "username": safe_username,
+                "user_id": data.get("id"),
+                "name": data.get("name"),
+                "followers": metrics.get("followers_count"),
+                "following": metrics.get("following_count"),
+                "tweets": metrics.get("tweet_count"),
+                "verified": verified,
+            }
         )
 
     async def _post_tweet(self, content: Optional[str]) -> ToolResult:
