@@ -60,7 +60,7 @@ You are wearing every hat. Nova gives you leverage without adding headcount.
 
 Nova is a fully autonomous Non-Human Assistant you run on your own server. It connects to you via Telegram (and optionally voice, email, WhatsApp, and X), builds a persistent memory of who you are, and can take real-world actions on your behalf — from writing emails to making phone calls to researching the web.
 
-Unlike SaaS assistants, Nova runs entirely on infrastructure you own. Your data stays on your server.
+Unlike SaaS AI assistants, Nova runs entirely on infrastructure you own. Your data stays on your server.
 
 ---
 
