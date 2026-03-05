@@ -549,7 +549,7 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 from src.a2a.handler import A2AHandler
 
                 _a2a_base_url = os.getenv("NOVA_BASE_URL", "").rstrip("/")
-                _a2a_card = AgentCardBuilder(base_url=_a2a_base_url)
+                _a2a_card = AgentCardBuilder(base_url=_a2a_base_url, tool_registry=agent.tools)
                 _a2a_handler = A2AHandler(
                     task_queue=task_queue,
                     conversation_manager=conversation_manager,

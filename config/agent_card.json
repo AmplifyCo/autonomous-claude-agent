@@ -35,5 +35,11 @@
       "tags": ["orchestration", "workflow", "automation"],
       "examples": ["Research and write a comparison post", "Audit and summarize findings"]
     }
+  ],
+  "hidden_tools": [
+    "bash",
+    "file_operations",
+    "nova_task",
+    "skill_learner"
   ]
 }
