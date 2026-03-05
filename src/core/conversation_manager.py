@@ -943,6 +943,10 @@ class ConversationManager:
             except Exception as e:
                 logger.error(f"Failed to load persona {name}: {e}")
 
+        if personas:
+            logger.info(f"Loaded {len(personas)} persona(s) from {persona_dir}")
+        return personas
+
     @classmethod
     def _load_capabilities(cls) -> str:
         """Load capabilities from capabilities.md."""
@@ -954,10 +958,6 @@ class ConversationManager:
         except FileNotFoundError:
             logger.warning("capabilities.md not found at %s", cap_path)
             return ""
-
-        if personas:
-            logger.info(f"Loaded {len(personas)} persona(s) from {persona_dir}")
-        return personas
 
     @classmethod
     def _load_tool_guides(cls) -> dict:
