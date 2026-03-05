@@ -542,6 +542,25 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         if dashboard.enabled and telegram.enabled:
             dashboard.set_telegram_notifier(telegram)
 
+        # A2A Protocol (Agent-to-Agent) — agent card + JSON-RPC endpoint
+        if dashboard.enabled and 'task_queue' in locals():
+            try:
+                from src.a2a.agent_card import AgentCardBuilder
+                from src.a2a.handler import A2AHandler
+
+                _a2a_base_url = os.getenv("NOVA_BASE_URL", "").rstrip("/")
+                _a2a_card = AgentCardBuilder(base_url=_a2a_base_url)
+                _a2a_handler = A2AHandler(
+                    task_queue=task_queue,
+                    conversation_manager=conversation_manager,
+                    api_key=config.nova_api_key or "",
+                )
+                dashboard.set_agent_card_builder(_a2a_card)
+                dashboard.set_a2a_handler(_a2a_handler)
+                logger.info("🤝 A2A: Agent card + endpoint wired")
+            except Exception as e:
+                logger.warning(f"A2A setup skipped: {e}")
+
         # Start dashboard server (non-blocking)
         dashboard_task = None
         if config.dashboard_enabled and dashboard.enabled:

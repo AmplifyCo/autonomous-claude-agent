@@ -15,8 +15,8 @@ from typing import Dict, Any, List, Optional
 logger = logging.getLogger(__name__)
 
 # HTTP paths exempt from auth (webhooks must be reachable without login)
-_EXEMPT_PATHS = {"/health", "/login", "/logout", "/telegram/webhook", "/linkedin/auth", "/linkedin/callback", "/nova/chat"}
-_EXEMPT_PREFIXES = ("/twilio/", "/audio/", "/ws/")
+_EXEMPT_PATHS = {"/health", "/login", "/logout", "/telegram/webhook", "/linkedin/auth", "/linkedin/callback", "/nova/chat", "/.well-known/agent-card.json"}
+_EXEMPT_PREFIXES = ("/twilio/", "/audio/", "/ws/", "/a2a")
 
 
 class Dashboard:
@@ -49,6 +49,8 @@ class Dashboard:
         self._owner_chat_id: Optional[str] = None
         self._task_queue = None
         self._brain = None
+        self._agent_card_builder = None
+        self._a2a_handler = None
 
         try:
             from fastapi import FastAPI
@@ -185,6 +187,15 @@ class Dashboard:
         """Wire the digital brain for the contacts stats widget."""
         self._brain = brain
         logger.info("Digital brain wired to dashboard")
+
+    def set_agent_card_builder(self, builder):
+        """Wire A2A agent card builder."""
+        self._agent_card_builder = builder
+
+    def set_a2a_handler(self, handler):
+        """Wire A2A JSON-RPC handler."""
+        self._a2a_handler = handler
+        logger.info("A2A handler wired to dashboard")
 
     # ── Stats helpers ──────────────────────────────────────────────────
 
@@ -379,6 +390,37 @@ class Dashboard:
         @app.get("/health")
         async def health():
             return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+        # ── A2A Protocol (Agent-to-Agent) ────────────────────────────
+
+        @app.get("/.well-known/agent-card.json")
+        async def agent_card():
+            """Public agent card — no auth required (A2A spec)."""
+            if not self._agent_card_builder:
+                return JSONResponse({"error": "Agent card not configured"}, status_code=503)
+            return JSONResponse(self._agent_card_builder.build())
+
+        @app.post("/a2a")
+        async def a2a_endpoint(request: Request):
+            """A2A JSON-RPC 2.0 endpoint — Bearer token auth."""
+            if not self._a2a_handler:
+                return JSONResponse({"error": "A2A not configured"}, status_code=503)
+            auth = request.headers.get("Authorization", "")
+            expected = self._a2a_handler._api_key
+            if not expected or not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], expected):
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "Unauthorized"}},
+                    status_code=401,
+                )
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+                    status_code=400,
+                )
+            result = await self._a2a_handler.handle_jsonrpc(body)
+            return JSONResponse(result)
 
         # ── Telegram webhook ──────────────────────────────────────────
         @app.post("/telegram/webhook")

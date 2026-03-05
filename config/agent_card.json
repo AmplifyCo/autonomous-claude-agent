@@ -1,0 +1,39 @@
+{
+  "name": "Nova",
+  "description": "AI agent specializing in content creation, research, communication, and task orchestration. Built by Srinath Reddy.",
+  "version": "1.0.0",
+  "provider": {
+    "organization": "Amplify",
+    "url": "https://amplify-pixels.com"
+  },
+  "skills": [
+    {
+      "id": "content-writing",
+      "name": "Content Writing",
+      "description": "Draft LinkedIn posts, tweets, emails in the owner's voice",
+      "tags": ["content", "linkedin", "twitter", "email"],
+      "examples": ["Write a LinkedIn post about AI agents", "Draft a tweet thread"]
+    },
+    {
+      "id": "research",
+      "name": "Research & Analysis",
+      "description": "Web research, competitor analysis, market intelligence",
+      "tags": ["research", "analysis", "web-search"],
+      "examples": ["Research AI agent frameworks", "Compare cloud providers"]
+    },
+    {
+      "id": "scheduling",
+      "name": "Scheduling & Reminders",
+      "description": "Calendar management, reminders, time-based task execution",
+      "tags": ["calendar", "scheduling", "reminders"],
+      "examples": ["Schedule a meeting", "Remind me to follow up"]
+    },
+    {
+      "id": "task-orchestration",
+      "name": "Task Orchestration",
+      "description": "Break complex goals into subtasks, execute multi-step workflows",
+      "tags": ["orchestration", "workflow", "automation"],
+      "examples": ["Research and write a comparison post", "Audit and summarize findings"]
+    }
+  ]
+}

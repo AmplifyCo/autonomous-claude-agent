@@ -102,22 +102,30 @@ Weekly: "23 requests handled, 3 corrections received (all about tone), approval 
 ## Phase 5: Agent Economy — From Assistant to CXO (Chief Execution Officer)
 *Nova manages like a CXO — knows the mission, delegates to the right agents, only does what nobody else can*
 
-### 5A. MCP Client (Tool Universe)
+### 5A. MCP Client (Tool Universe) (IMPLEMENTED)
 Nova consumes any MCP-compatible tool server. Instead of hand-coding each integration, Nova discovers tools from the MCP Registry (~2,000+ servers) and connects on demand.
-- MCP client adapter in Nova's tool layer
-- Dynamic tool discovery: "find me a tool that can do X" → search MCP Registry → connect → use
-- Auth handling: API keys, OAuth flows per MCP server spec
-- Caching: tool schemas cached locally, refreshed on demand
-**Protocols**: MCP (JSON-RPC 2.0), MCP Registry API
+- MCP client adapter in Nova's tool layer (MCPClientTool extends BaseTool)
+- Config-driven: define servers in config/mcp_servers.json (command, args, env, risk_level)
+- Lazy connection: servers spawn on first use, not at boot
+- Namespaced tools: `server__tool_name` prevents collisions
+- PolicyGate integration: risk levels from config injected into TOOL_RISK_MAP
+- Hot-reload: "reload plugins" re-discovers MCP servers
+- Auth handling: `${VAR}` env resolution via credential store → os.getenv
+**New files**: src/core/tools/mcp/ (mcp_client_tool.py, mcp_server_manager.py)
+**Modified**: registry.py (+MCP wiring), main.py (+startup discovery/shutdown)
+**Protocols**: MCP (JSON-RPC 2.0), stdio transport
 **Impact**: Nova goes from ~15 hand-built tools to thousands, instantly
 
-### 5B. Agent Identity & Discovery
-Nova publishes an Agent Card (A2A spec) so other agents and platforms can discover it.
-- `/.well-known/agent-card.json` — Nova's capabilities, skills, auth requirements
-- Identity: name, description, capabilities list, supported protocols, contact endpoint
-- Reputation: linked Moltbook profile, task completion stats, specializations
-- Cryptographically signed for trust verification
-**Protocols**: A2A Agent Cards, W3C DIDs (future)
+### 5B. Agent Identity & Discovery (IMPLEMENTED)
+Nova publishes an Agent Card (A2A spec) and exposes a JSON-RPC 2.0 endpoint for receiving tasks.
+- `/.well-known/agent-card.json` — public discovery (name, skills, capabilities, auth scheme)
+- `/a2a` — JSON-RPC 2.0 endpoint (message/send, tasks/get, tasks/cancel)
+- Bearer token auth (reuses NOVA_API_KEY)
+- A2A tasks flow through existing TaskQueue → GoalDecomposer → TaskRunner pipeline
+- Config-driven skills in config/agent_card.json
+**New files**: src/a2a/ (models.py, agent_card.py, handler.py)
+**Modified**: dashboard.py (+routes), main.py (+wiring)
+**Protocols**: A2A (JSON-RPC 2.0), Bearer auth
 **Impact**: Nova becomes discoverable — other agents can find and delegate to it
 
 ### 5C. Agent Collaboration & Delegation (Orchestrator Mode)
