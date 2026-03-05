@@ -99,8 +99,8 @@ Weekly: "23 requests handled, 3 corrections received (all about tone), approval 
 
 ---
 
-## Phase 5: Agent Economy — From Assistant to Autonomous Operator
-*Nova participates in the agent world — discovers tools, collaborates with agents, takes on work*
+## Phase 5: Agent Economy — From Assistant to CXO (Chief Execution Officer)
+*Nova manages like a CXO — knows the mission, delegates to the right agents, only does what nobody else can*
 
 ### 5A. MCP Client (Tool Universe)
 Nova consumes any MCP-compatible tool server. Instead of hand-coding each integration, Nova discovers tools from the MCP Registry (~2,000+ servers) and connects on demand.
@@ -187,4 +187,4 @@ Nova builds a trusted network of specialist agents it works with repeatedly.
 | 2     | Anticipatory | "It knows what I need" | React to Predict |
 | 3     | Reasoning | "It thinks for itself" | Execute to Judge |
 | 4     | Autonomous Growth | "It's getting better" | Static to Evolving |
-| 5     | Agent Economy | "It operates in the world" | Assistant to Autonomous Operator |
+| 5     | Agent Economy | "It runs the show" | Assistant to CXO |
