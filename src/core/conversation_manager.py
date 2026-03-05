@@ -2560,7 +2560,8 @@ Examples:
     # ── Phase 4A: Skill Learning ─────────────────────────────────────────
 
     _SKILL_LEARN_PATTERN = re.compile(
-        r'(?:learn\s+(?:this\s+)?(?:skill|api)|/learn)\s*:?\s*(https://\S+\.(?:md|json))\b',
+        r'(?:learn\s+(?:this\s+)?(?:skill|api)|/learn)\s*:?\s*(https://\S+\.(?:md|json))\b'
+        r'(.*)?',
         re.IGNORECASE,
     )
 
@@ -2570,7 +2571,10 @@ Examples:
         Detects messages like:
         - "learn this skill: https://example.com/skill.md"
         - "/learn https://example.com/skill.md"
-        - "learn this API: https://example.com/spec.md"
+        - "learn this skill: https://example.com/skill.md as NovaBotNonHuman"
+        - "learn this skill: https://example.com/skill.md register with name CoolBot"
+
+        Everything after the URL is passed as custom instructions to the learner.
 
         Returns response string if handled, None otherwise.
         """
@@ -2579,12 +2583,13 @@ Examples:
             return None
 
         url = match.group(1)
+        instructions = (match.group(2) or "").strip()  # Everything after URL
         skill_tool = self.agent.tools.get_tool("learn_skill") if hasattr(self.agent, 'tools') else None
         if not skill_tool or not getattr(skill_tool, 'skill_learner', None):
             return "Skill learning is not available."
 
-        logger.info(f"Skill learn command: {url}")
-        success, msg = await skill_tool.skill_learner.learn_from_url(url)
+        logger.info(f"Skill learn command: {url}" + (f" (instructions: {instructions})" if instructions else ""))
+        success, msg = await skill_tool.skill_learner.learn_from_url(url, user_instructions=instructions)
         return msg
 
     # ── Kill Switch: /stop and /resume ──────────────────────────────────────

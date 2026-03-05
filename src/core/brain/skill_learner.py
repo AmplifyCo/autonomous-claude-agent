@@ -200,13 +200,15 @@ class SkillLearner:
 
     # ── Public API ───────────────────────────────────────────────────────
 
-    async def learn_from_url(self, url: str) -> Tuple[bool, str]:
+    async def learn_from_url(self, url: str, user_instructions: str = "") -> Tuple[bool, str]:
         """Learn a new skill from a .md spec URL.
 
         Full pipeline: fetch → parse → generate → validate → write → reload.
 
         Args:
             url: HTTPS URL to a .md API spec file
+            user_instructions: Optional instructions from user (e.g., "as NovaBotNonHuman",
+                "register with name CoolBot", "use description: AI agent for Srinath")
 
         Returns:
             (success, human-readable message)
@@ -265,7 +267,7 @@ class SkillLearner:
 
         # Step 6b: LLM reads the spec, figures out registration, executes it
         if missing_env and self.credential_store and self.llm:
-            reg_result = await self._try_self_registration(parsed, missing_env, content)
+            reg_result = await self._try_self_registration(parsed, missing_env, content, user_instructions=user_instructions)
             if reg_result:
                 # Re-check after registration saved credentials
                 missing_env = [
@@ -279,6 +281,8 @@ class SkillLearner:
                 "\n\nTo activate it, set these environment variables:\n"
                 + "\n".join(f"  - {v}" for v in missing_env)
                 + "\n\nThen say 'reload plugins'."
+                + "\n\nOr retry with a custom name: "
+                + "'learn this skill: " + url + " as YourPreferredName'"
             )
         else:
             status = "active"
@@ -617,7 +621,8 @@ class SkillLearner:
         return False
 
     async def _try_self_registration(
-        self, spec: ParsedSpec, missing_env: List[str], raw_spec: str
+        self, spec: ParsedSpec, missing_env: List[str], raw_spec: str,
+        user_instructions: str = "",
     ) -> bool:
         """Use LLM to read the spec, understand registration, and execute it.
 
@@ -642,7 +647,8 @@ class SkillLearner:
             f"My details for registration:\n"
             f"- name: {bot_name}\n"
             f"- description: AI assistant for {owner_name}. Autonomous agent powered by Claude.\n\n"
-            f"API BASE URL: {spec.base_url}\n\n"
+            + (f"USER INSTRUCTIONS (override defaults above): {user_instructions}\n\n" if user_instructions else "")
+            + f"API BASE URL: {spec.base_url}\n\n"
             f"API SPEC:\n{raw_spec[:6000]}\n\n"
             f"Return ONLY valid JSON (no markdown fences). If no registration endpoint exists, "
             f"return: {{\"can_register\": false}}\n"
