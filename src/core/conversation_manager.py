@@ -322,10 +322,19 @@ class ConversationManager:
             session_lock = self._session_locks[user_key]
 
             async with session_lock:
-                return await self._process_message_locked(
+                response = await self._process_message_locked(
                     message, channel, user_id, metadata,
                     progress_callback, enable_periodic_updates, raw_contact
                 )
+
+            # Shorten long URLs in the response before sending to user
+            try:
+                from src.utils.url_shortener import shorten_urls_in_text
+                response = await shorten_urls_in_text(response)
+            except Exception:
+                pass  # fail-open
+
+            return response
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
