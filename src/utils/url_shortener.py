@@ -11,7 +11,7 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-_API_URL = "https://ulvis.net/api.php"
+_API_URL = "https://is.gd/create.php"
 _MIN_URL_LENGTH = 60  # Only shorten URLs longer than this
 _TIMEOUT = 5  # seconds
 
@@ -28,7 +28,7 @@ async def shorten_url(long_url: str) -> Optional[str]:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 _API_URL,
-                params={"url": long_url, "private": "1"},
+                params={"format": "simple", "url": long_url},
                 timeout=aiohttp.ClientTimeout(total=_TIMEOUT),
             ) as resp:
                 if resp.status == 200:
