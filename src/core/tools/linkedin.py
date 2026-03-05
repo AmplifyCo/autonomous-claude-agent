@@ -18,6 +18,7 @@ API docs:
 """
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import aiohttp
@@ -28,43 +29,14 @@ from ..types import ToolResult
 logger = logging.getLogger(__name__)
 
 # ── LinkedIn Content Composition Guide ────────────────────────────────────────
-# This guide is embedded in the tool description so the agent reads it before
-# composing any LinkedIn post. It covers length tiers, formatting, and quality.
-
-_CONTENT_GUIDE = """\
-
-POST LENGTH TIERS:
-• 𝘀𝗵𝗼𝗿𝘁 — 1-3 lines (100-300 chars). Punchy insight, hot take, or provocative question. \
-No fluff, no hashtags needed. Think "shower thought for professionals."
-• 𝗺𝗲𝗱𝗶𝘂𝗺 (default) — 5-10 lines (500-1200 chars). Structured insight: \
-hook line → context/story → key takeaway or question. 3-5 hashtags at end.
-• 𝗹𝗼𝗻𝗴 — 12-25 lines (1500-3000 chars). Thought leadership: \
-compelling hook → story/data → detailed analysis with bullet points → \
-lessons/takeaways → call to action or question. Use Unicode formatting for structure. 3-5 hashtags.
-
-LINKEDIN FORMATTING (no markdown — use Unicode):
-  𝗕𝗼𝗹𝗱 text       → Use Unicode Mathematical Sans-Serif Bold (𝗔-𝗭, 𝗮-𝘇) for headers and key phrases
-  𝘐𝘵𝘢𝘭𝘪𝘤 text      → Use Unicode Mathematical Sans-Serif Italic (𝘈-𝘡, 𝘢-𝘻) for emphasis
-  • Bullet points  → Use • for lists (not - or *)
-  → Arrows         → Use → or ➜ for flow/sequence
-  ✦ Stars          → Use ✦ or ★ for highlights
-  ─── Dividers     → Use ─── or ═══ between sections
-  ① Numbers        → Use ①②③④⑤ for numbered lists
-  Spacing          → Use blank lines between paragraphs for readability
-  NEVER use markdown (#, **, _, ```) — LinkedIn renders it as raw text.
-
-QUALITY RULES:
-  1. HOOK FIRST — First line must stop the scroll. Lead with a bold claim, question, \
-or surprising stat. Never start with "I'm excited to share..." or "In today's world..."
-  2. ONE IDEA — Each post should nail ONE clear idea, not ramble across topics.
-  3. WHITE SPACE — Short paragraphs (1-3 sentences). Walls of text get skipped.
-  4. AUTHENTIC VOICE — Write as the principal would speak. Professional but human, \
-not corporate jargon. Show personality.
-  5. END STRONG — Close with a question, call to action, or memorable one-liner. \
-Never end with just hashtags.
-  6. HASHTAGS — Place at the very end, separated by a blank line. 3-5 relevant ones. \
-Mix broad (#AI, #Tech) with niche (#MLOps, #FounderLife).
-"""
+# Loaded from src/core/personas/linkedin_guide.md — edit the .md file to update.
+_GUIDE_PATH = Path(__file__).parent.parent / "personas" / "linkedin_guide.md"
+try:
+    _CONTENT_GUIDE = _GUIDE_PATH.read_text(encoding="utf-8").strip()
+    logger.debug("LinkedIn content guide loaded from %s", _GUIDE_PATH)
+except FileNotFoundError:
+    logger.warning("LinkedIn content guide not found at %s — using empty", _GUIDE_PATH)
+    _CONTENT_GUIDE = ""
 
 # New Posts REST API (replaces legacy /v2/ugcPosts)
 _POSTS_URL = "https://api.linkedin.com/rest/posts"
