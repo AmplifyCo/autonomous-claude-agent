@@ -9,6 +9,7 @@
         "address": "read",
         "generate": "write",
         "send": "irreversible",
+        "sweep": "irreversible",
         "sign": "write",
         "tx_status": "read",
         "_default": "read"

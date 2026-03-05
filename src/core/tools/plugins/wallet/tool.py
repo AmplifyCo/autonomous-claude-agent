@@ -21,9 +21,17 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_CHAINS = ("base", "solana")
 
+# Owner's personal wallet addresses — sweep destination
+OWNER_BASE_ADDRESS = os.getenv("OWNER_BASE_ADDRESS", "")
+OWNER_SOLANA_ADDRESS = os.getenv("OWNER_SOLANA_ADDRESS", "")
+
 # Spending limits — configurable via env vars
 MAX_SEND_PER_TX = float(os.getenv("WALLET_MAX_PER_TX", "10"))       # Max USDC per single send
 MAX_SEND_PER_DAY = float(os.getenv("WALLET_MAX_PER_DAY", "50"))     # Max USDC per 24h window
+
+# Auto-sweep: forward USDC to owner when balance exceeds threshold
+SWEEP_THRESHOLD = float(os.getenv("WALLET_SWEEP_THRESHOLD", "50"))   # Trigger sweep above this USDC
+SWEEP_KEEP = float(os.getenv("WALLET_SWEEP_KEEP", "5"))              # Keep this much USDC as gas buffer
 
 # Approval expiry — pending transfers expire after this many seconds
 APPROVAL_EXPIRY_SECONDS = 300  # 5 minutes
@@ -38,13 +46,14 @@ class WalletTool(BaseTool):
         "Operations: generate (create keypair), address (show address), "
         "balance (check ETH/SOL + USDC), send (request USDC transfer — requires owner approval), "
         "confirm_send (execute a previously approved transfer), "
+        "sweep (forward USDC above threshold to owner's personal wallet), "
         "sign (sign a message), tx_status (check transaction)."
     )
     parameters = {
         "operation": {
             "type": "string",
             "description": "Wallet operation to perform",
-            "enum": ["generate", "address", "balance", "send", "confirm_send", "sign", "tx_status"],
+            "enum": ["generate", "address", "balance", "send", "confirm_send", "sweep", "sign", "tx_status"],
         },
         "chain": {
             "type": "string",
@@ -111,6 +120,8 @@ class WalletTool(BaseTool):
                 return await self._request_send(chain, kwargs.get("to", ""), kwargs.get("amount", 0))
             elif operation == "confirm_send":
                 return await self._confirm_send(kwargs.get("approval_code", ""))
+            elif operation == "sweep":
+                return await self._sweep(chain)
             elif operation == "sign":
                 return await self._sign(chain, kwargs.get("message", ""))
             elif operation == "tx_status":
@@ -152,12 +163,24 @@ class WalletTool(BaseTool):
         else:
             output = f"Solana wallet ({address}):\n  SOL: {balances['sol']}\n  USDC: {balances['usdc']}"
 
-        return ToolResult(success=True, output=output, metadata={"chain": chain, **balances})
+        # Check if auto-sweep is needed
+        usdc_balance = float(balances.get("usdc", 0))
+        sweep_note = ""
+        if usdc_balance > SWEEP_THRESHOLD:
+            owner_addr = OWNER_BASE_ADDRESS if chain == "base" else OWNER_SOLANA_ADDRESS
+            if owner_addr:
+                sweep_note = (
+                    f"\n\n⚠️ USDC balance ({usdc_balance:.2f}) exceeds sweep threshold ({SWEEP_THRESHOLD})."
+                    f"\nUse operation='sweep' to forward excess to owner's wallet."
+                )
+
+        return ToolResult(success=True, output=output + sweep_note, metadata={"chain": chain, **balances})
 
     def _check_spending_limits(self, to: str, amount: float) -> str:
         """Check per-tx and daily spending limits. Returns error message or empty string."""
-        # Owner address bypasses limits
-        if OWNER_ADDRESS and to.lower() == OWNER_ADDRESS.lower():
+        # Owner addresses bypass limits (sweeps to owner's personal wallet)
+        owner_addresses = {a.lower() for a in [OWNER_BASE_ADDRESS, OWNER_SOLANA_ADDRESS] if a}
+        if owner_addresses and to.lower() in owner_addresses:
             return ""
 
         # Per-transaction limit
@@ -275,6 +298,63 @@ class WalletTool(BaseTool):
             success=True,
             output=f"Transfer approved and executed.\nSent {amount} USDC on {chain} to {to}\nTransaction: {tx_hash}",
             metadata={"chain": chain, "tx_hash": tx_hash, "amount": amount, "to": to},
+        )
+
+    async def _sweep(self, chain: str) -> ToolResult:
+        """Sweep USDC above threshold to owner's personal wallet."""
+        owner_addr = OWNER_BASE_ADDRESS if chain == "base" else OWNER_SOLANA_ADDRESS
+        if not owner_addr:
+            return ToolResult(
+                success=False,
+                error=f"No owner {chain} address configured. Set OWNER_{chain.upper()}_ADDRESS env var.",
+            )
+
+        address = self._keystore.get_address(chain)
+        if not address:
+            return ToolResult(success=False, error=f"No {chain} wallet. Generate one first.")
+
+        # Check current USDC balance
+        adapter = self._chain_adapter(chain)
+        balances = await adapter.get_balance(address)
+        usdc_balance = float(balances.get("usdc", 0))
+
+        if usdc_balance <= SWEEP_THRESHOLD:
+            return ToolResult(
+                success=True,
+                output=(
+                    f"No sweep needed. {chain} USDC balance: {usdc_balance:.2f}\n"
+                    f"Threshold: {SWEEP_THRESHOLD} USDC"
+                ),
+                metadata={"chain": chain, "balance": usdc_balance, "swept": False},
+            )
+
+        # Sweep: send everything above SWEEP_KEEP to owner
+        sweep_amount = usdc_balance - SWEEP_KEEP
+        if sweep_amount <= 0:
+            return ToolResult(
+                success=True,
+                output=f"Balance {usdc_balance:.2f} USDC is at or below keep amount ({SWEEP_KEEP}).",
+                metadata={"chain": chain, "balance": usdc_balance, "swept": False},
+            )
+
+        private_key = self._keystore.get_private_key(chain)
+        if not private_key:
+            return ToolResult(success=False, error=f"No {chain} wallet key.")
+
+        tx_hash = await adapter.send_usdc(private_key, owner_addr, sweep_amount)
+        logger.info(
+            f"Wallet SWEEP: {sweep_amount:.2f} USDC on {chain} → owner ({owner_addr}) tx: {tx_hash}"
+        )
+
+        return ToolResult(
+            success=True,
+            output=(
+                f"Swept {sweep_amount:.2f} USDC on {chain} to owner wallet.\n"
+                f"Kept {SWEEP_KEEP} USDC as buffer.\n"
+                f"To: {owner_addr}\n"
+                f"Transaction: {tx_hash}"
+            ),
+            metadata={"chain": chain, "tx_hash": tx_hash, "amount": sweep_amount, "to": owner_addr},
         )
 
     async def _notify_owner_approval(self, chain: str, to: str, amount: float, code: str):
