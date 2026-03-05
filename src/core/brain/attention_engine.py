@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from ..timezone import now as tz_now
 from .nova_purpose import NovaPurpose, PurposeMode
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,9 @@ class AttentionEngine:
 
     async def _scan_and_surface(self):
         """Scan memory and surface purpose-driven observations."""
-        now = datetime.now()
+        now = tz_now()
 
-        # Only send during waking hours (7am – 9pm)
+        # Only send during waking hours (7am – 9pm) in user's timezone
         if not (7 <= now.hour <= 21):
             logger.debug("AttentionEngine: outside waking hours, skipping")
             return
@@ -270,14 +271,14 @@ class AttentionEngine:
         key = observation[:50].lower()
         if key in log:
             sent_at = datetime.fromisoformat(log[key])
-            if datetime.now() - sent_at < timedelta(hours=24):
+            if tz_now() - sent_at < timedelta(hours=24):
                 return True
         return False
 
     def _mark_sent(self, observation: str):
         log = self._load_log()
         key = observation[:50].lower()
-        log[key] = datetime.now().isoformat()
+        log[key] = tz_now().isoformat()
         # Prune old entries (keep last 100)
         if len(log) > 100:
             oldest = sorted(log.items(), key=lambda x: x[1])[:20]
