@@ -162,17 +162,18 @@ Nova (orchestrator):
 ### 5D. Marketplace & Payments (Agent Treasury)
 Nova takes paid work and manages money like a CXO with a project budget — never fronts its own capital.
 
-**Payment flow:**
+**Payment flow (standard commercial terms):**
 ```
-1. Client posts job (USDC/ETH locked in escrow)
-2. Nova bids → client accepts → escrow funds the project
-3. Nova decomposes work:
-   ├─ Self-execute (free — Nova's own compute)
-   ├─ Delegate subtask A → pay Agent X from project budget (x402 / USDC)
-   └─ Delegate subtask B → pay Agent Y from project budget
-4. Nova delivers final result → client approves → escrow releases
-5. Revenue = client payment − sub-agent costs − gas fees
+1. Client posts job → Nova bids with quote
+2. Client accepts → payment locked in escrow (USDC/ETH)
+3. Nova decomposes and executes:
+   ├─ Self-execute what it can
+   └─ Delegate subtasks to sub-agents (work now, pay on completion)
+4. Nova delivers → client approves → escrow releases to Nova
+5. Nova pays sub-agents from received payment
+6. Profit = client payment − sub-agent fees − gas
 ```
+Nova never pays before getting paid. Sub-agents work on delivery terms — same as any contractor relationship. If a sub-agent demands upfront payment, Nova factors that into the bid or picks a different agent.
 
 - **Wallet**: Base (Moltlaunch, Stripe x402) + Solana (broader agent economy). USDC as default currency.
 - **x402 client**: HTTP 402 auto-pay for APIs and agent services — agent requests resource, gets payment request, signs USDC, access granted. No human in the loop.
