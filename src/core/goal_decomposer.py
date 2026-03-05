@@ -230,6 +230,9 @@ class GoalDecomposer:
                 priority = item.get("priority", "q2")
                 if priority not in ("q1", "q2", "q3", "q4"):
                     priority = "q2"
+                orch_strategy = item.get("orchestration_strategy", "auto")
+                if orch_strategy not in ("auto", "race", "fan_out"):
+                    orch_strategy = "auto"
 
                 subtasks.append(Subtask(
                     description=desc,
@@ -242,6 +245,7 @@ class GoalDecomposer:
                     execution_mode=exec_mode,
                     delegate_to=delegate_to,
                     priority=priority,
+                    orchestration_strategy=orch_strategy,
                 ))
 
             # Ensure synthesis step mentions the task_id file path

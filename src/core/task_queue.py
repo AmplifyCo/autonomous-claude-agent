@@ -34,6 +34,7 @@ class Subtask:
     execution_mode: str = "self"          # "self" | "delegate" — Eisenhower Matrix decision
     delegate_to: str = ""                 # Agent name from known_agents.json (if execution_mode="delegate")
     priority: str = "q2"                  # Eisenhower quadrant: q1 (do), q2 (schedule), q3 (delegate), q4 (eliminate)
+    orchestration_strategy: str = "auto"  # "auto" | "race" | "fan_out" — multi-agent strategy
 
 
 @dataclass
@@ -83,6 +84,7 @@ class Task:
                     "execution_mode": st.execution_mode,
                     "delegate_to": st.delegate_to,
                     "priority": st.priority,
+                    "orchestration_strategy": st.orchestration_strategy,
                 }
                 for st in self.subtasks
             ],
@@ -181,6 +183,7 @@ class TaskQueue:
                 "execution_mode": st.execution_mode,
                 "delegate_to": st.delegate_to,
                 "priority": st.priority,
+                "orchestration_strategy": st.orchestration_strategy,
             }
             for st in subtasks
         ])
@@ -214,6 +217,7 @@ class TaskQueue:
                 "execution_mode": st.execution_mode,
                 "delegate_to": st.delegate_to,
                 "priority": st.priority,
+                "orchestration_strategy": st.orchestration_strategy,
             }
             for st in task.subtasks
         ])
@@ -332,6 +336,7 @@ class TaskQueue:
                 execution_mode=s.get("execution_mode", "self"),
                 delegate_to=s.get("delegate_to", ""),
                 priority=s.get("priority", "q2"),
+                orchestration_strategy=s.get("orchestration_strategy", "auto"),
             )
             for s in subtask_dicts
         ]

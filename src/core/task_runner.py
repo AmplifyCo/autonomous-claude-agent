@@ -57,6 +57,7 @@ class TaskRunner:
         owner_whatsapp_number: str = "",  # Fallback WhatsApp number from .env for task notifications
         episodic_memory=None,        # EpisodicMemory (for tool performance tracking)
         agent_broker=None,           # AgentBroker (for delegating subtasks to external agents)
+        orchestrator=None,           # Orchestrator (for spawning internal sub-agents)
     ):
         self.task_queue = task_queue
         self.goal_decomposer = goal_decomposer
@@ -69,6 +70,7 @@ class TaskRunner:
         self.owner_whatsapp_number = owner_whatsapp_number
         self.episodic_memory = episodic_memory
         self.agent_broker = agent_broker
+        self.orchestrator = orchestrator
         self._running = False
         self._current_task_id: Optional[str] = None
         Path("./data/tasks").mkdir(parents=True, exist_ok=True)
@@ -446,10 +448,24 @@ class TaskRunner:
         start_idx: int,
         prior_results: List[str],
     ) -> List[tuple]:
-        """Execute multiple independent subtasks concurrently via asyncio.gather.
+        """Execute multiple independent subtasks concurrently.
+
+        Uses Orchestrator (internal sub-agents) when available for true isolation.
+        Falls back to asyncio.gather on shared agent instance otherwise.
 
         Returns list of (idx, subtask, result_str, re_delegated_bool).
         """
+        # ── Orchestrator path: each subtask gets its own SubAgent ──────────
+        if self.orchestrator and len(wave) > 1:
+            # Check if all subtasks in wave are self-execute (not external delegation)
+            all_self = all(getattr(st, 'execution_mode', 'self') == 'self' for st in wave)
+            if all_self:
+                try:
+                    return await self._orchestrator_parallel(task, wave, start_idx, prior_results)
+                except Exception as e:
+                    logger.warning(f"Orchestrator parallel failed: {e} — falling back to shared agent")
+
+        # ── Fallback: existing asyncio.gather on shared agent instance ─────
         async def _run_one(idx: int, subtask) -> tuple:
             result = await self._execute_subtask(task, subtask, idx, prior_results)
             re_delegated = False
@@ -464,50 +480,68 @@ class TaskRunner:
         coros = [_run_one(start_idx + i, st) for i, st in enumerate(wave)]
         return await asyncio.gather(*coros, return_exceptions=False)
 
-    async def _execute_subtask(self, task: Task, subtask, idx: int, prior_results: list) -> str:
-        """Execute a single subtask via agent.run() and return the result string.
+    async def _orchestrator_parallel(
+        self,
+        task: Task,
+        wave: List,
+        start_idx: int,
+        prior_results: List[str],
+    ) -> List[tuple]:
+        """Execute wave via Orchestrator — each subtask gets its own SubAgent.
 
-        If execution_mode is 'delegate' and an AgentBroker is available, delegates
-        to an external agent first. Falls back to self-execute on failure (CXO style).
+        SubAgents have isolated message history and run truly concurrently.
         """
-        # ── Delegation branch (Eisenhower Q3/Q4) ─────────────────────────────
-        if getattr(subtask, 'execution_mode', 'self') == 'delegate' and self.agent_broker:
-            delegate_to = getattr(subtask, 'delegate_to', '')
-            if delegate_to:
-                try:
-                    agent_config = self.agent_broker._agents.get(delegate_to)
-                    if agent_config and agent_config.get("enabled", True):
-                        logger.info(f"Task {task.id}: delegating step {idx+1} to '{delegate_to}'")
-                        result = await self.agent_broker.delegate(
-                            agent_config={**agent_config, "_name": delegate_to},
-                            task_text=subtask.description,
-                            context_id=task.id,
-                        )
-                        return result or "Delegated step completed (no output)"
-                    else:
-                        logger.warning(f"Agent '{delegate_to}' not found/disabled, falling back to self-execute")
-                except Exception as e:
-                    logger.warning(f"Delegation to '{delegate_to}' failed: {e} — trying self-execute")
-                    # CXO fallback: check if Nova has the required tools
-                    if subtask.tool_hints and not any(
-                        t in self.agent.tools.tools for t in subtask.tool_hints
-                    ):
-                        return f"ERROR: Delegated to {delegate_to} (failed: {e}). Nova lacks tools for this step."
-                    logger.info(f"Nova has the tools — self-executing step {idx+1} instead")
+        logger.info(f"Task {task.id}: using Orchestrator for {len(wave)} parallel sub-agents")
 
-        # ── Self-execute path (existing) ──────────────────────────────────────
-        # Build an enriched subtask prompt that includes prior results as context
+        context = "\n".join(prior_results[-3:]) if prior_results else ""
+        task_specs = []
+        for i, subtask in enumerate(wave):
+            prompt = self._build_subtask_prompt(task, subtask, start_idx + i, prior_results)
+            task_specs.append({
+                "description": prompt,
+                "model": self._resolve_model(subtask.model_tier),
+                "context": context,
+            })
+
+        # Enable policy gate bypass for sub-agents (pre-approved background tasks)
+        self.agent.tools.policy_gate.set_bypass(True)
+        try:
+            results = await self.orchestrator.spawn_parallel(task_specs, max_concurrent=3)
+        finally:
+            self.agent.tools.policy_gate.set_bypass(False)
+
+        return [
+            (
+                start_idx + i,
+                wave[i],
+                r.summary if r.success else f"ERROR: {r.error}",
+                False,
+            )
+            for i, r in enumerate(results)
+        ]
+
+    def _resolve_model(self, model_tier: str) -> str:
+        """Map model_tier to a LiteLLM model string for sub-agents."""
+        tier_map = {
+            "flash": "gemini/gemini-2.0-flash",
+            "haiku": "gemini/gemini-2.0-flash",
+            "sonnet": "claude-sonnet-4-20250514",
+            "opus": "claude-opus-4-20250514",
+        }
+        return tier_map.get(model_tier, "claude-sonnet-4-20250514")
+
+    def _build_subtask_prompt(self, task: Task, subtask, idx: int, prior_results: list) -> str:
+        """Build the execution prompt for a subtask (used by both self-execute and Orchestrator)."""
         context = ""
         if prior_results:
-            # Only include last 3 results to avoid context bloat
             recent = prior_results[-3:]
             context = "\n\nPREVIOUS STEPS COMPLETED:\n" + "\n".join(recent) + "\n\n---\n"
 
         bot_name = os.getenv("BOT_NAME", "Nova")
         owner_name = os.getenv("OWNER_NAME", "User")
-
         signature = f"{bot_name} — {owner_name}'s Non-Human Assistant"
-        task_prompt = (
+
+        prompt = (
             f"IDENTITY: You are {bot_name}, {owner_name}'s Non-Human Assistant.\n"
             f"SIGNATURE RULE (MANDATORY): When signing off on any content "
             f"(LinkedIn posts, tweets, emails, reports), you MUST sign as:\n"
@@ -518,10 +552,10 @@ class TaskRunner:
             f"- You are a professional content writer. Write posts that are engaging, "
             f"insightful, and well-structured.\n"
             f"- LinkedIn does NOT support markdown. Use Unicode formatting instead:\n"
-            f"  𝗕𝗼𝗹𝗱 (Mathematical Sans-Serif Bold) for headers/key phrases\n"
-            f"  𝘐𝘵𝘢𝘭𝘪𝘤 (Mathematical Sans-Serif Italic) for emphasis\n"
-            f"  • for bullet points, → for arrows, ✦ for highlights\n"
-            f"  ─── for section dividers, ①②③ for numbered lists\n"
+            f"  \U0001d5d5\U0001d5fc\U0001d5f9\U0001d5f1 (Mathematical Sans-Serif Bold) for headers/key phrases\n"
+            f"  \U0001d608\U0001d61d\U0001d5ee\U0001d5f9\U0001d5f6\U0001d5f0 (Mathematical Sans-Serif Italic) for emphasis\n"
+            f"  \u2022 for bullet points, \u2192 for arrows, \u2726 for highlights\n"
+            f"  \u2500\u2500\u2500 for section dividers, \u2460\u2461\u2462 for numbered lists\n"
             f"- HOOK FIRST: First line must stop the scroll. Bold claim, question, or stat.\n"
             f"- Use the post_length parameter: short (1-3 lines), medium (5-10 lines), "
             f"long (12-25 lines with full structure).\n"
@@ -533,15 +567,44 @@ class TaskRunner:
             f"Complete this step and report what you found/did. Be thorough."
         )
 
-        # Add tool hints as guidance
         if subtask.tool_hints:
-            task_prompt += f"\n\nSuggested tools for this step: {', '.join(subtask.tool_hints)}"
-
-        # Add verification criteria so the agent knows what "done" looks like (#1)
+            prompt += f"\n\nSuggested tools for this step: {', '.join(subtask.tool_hints)}"
         if subtask.verification_criteria:
-            task_prompt += f"\n\nSuccess criterion: {subtask.verification_criteria}"
+            prompt += f"\n\nSuccess criterion: {subtask.verification_criteria}"
 
-        # Use 'sonnet' tier for synthesis (last step), 'flash' for everything else
+        return prompt
+
+    async def _execute_subtask(self, task: Task, subtask, idx: int, prior_results: list) -> str:
+        """Execute a single subtask via agent.run() and return the result string.
+
+        If execution_mode is 'delegate' and an AgentBroker is available, delegates
+        to an external agent first. Falls back to self-execute on failure (CXO style).
+        """
+        # ── Delegation branch (Eisenhower Q3/Q4) ─────────────────────────────
+        if getattr(subtask, 'execution_mode', 'self') == 'delegate' and self.agent_broker:
+            delegate_to = getattr(subtask, 'delegate_to', '')
+            strategy = getattr(subtask, 'orchestration_strategy', 'auto')
+            try:
+                logger.info(f"Task {task.id}: delegating step {idx+1} (agent='{delegate_to}', strategy='{strategy}')")
+                result = await self.agent_broker.delegate_smart(
+                    subtask_description=subtask.description,
+                    tool_hints=subtask.tool_hints or [],
+                    delegate_to=delegate_to,
+                    context_id=task.id,
+                    strategy=strategy,
+                )
+                return result or "Delegated step completed (no output)"
+            except Exception as e:
+                logger.warning(f"Delegation failed: {e} — trying self-execute")
+                # CXO fallback: check if Nova has the required tools
+                if subtask.tool_hints and not any(
+                    t in self.agent.tools.tools for t in subtask.tool_hints
+                ):
+                    return f"ERROR: Delegation failed ({e}). Nova lacks tools for this step."
+                logger.info(f"Nova has the tools — self-executing step {idx+1} instead")
+
+        # ── Self-execute path ─────────────────────────────────────────────────
+        task_prompt = self._build_subtask_prompt(task, subtask, idx, prior_results)
         model_tier = "sonnet"  # Use better model for all subtasks to reduce failures
 
         for attempt in range(self.MAX_SUBTASK_RETRIES):

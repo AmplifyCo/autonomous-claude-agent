@@ -1,9 +1,11 @@
 """AgentBroker — discovers agents, matches capabilities, tracks reliability.
 
 Decides which external agent to delegate to based on capability tags
-and historical reliability scores. CXO-level orchestration.
+and historical reliability scores. Supports multi-agent orchestration:
+race (first success wins) and fan-out (merge all results).
 """
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -228,6 +230,121 @@ class AgentBroker:
         except Exception as e:
             self.update_reliability(agent_name, success=False)
             raise RuntimeError(f"Delegation to '{agent_name}' failed: {e}")
+
+    # ── Multi-Agent Orchestration ────────────────────────────────────────────
+
+    async def delegate_smart(
+        self,
+        subtask_description: str,
+        tool_hints: List[str],
+        delegate_to: str = "",
+        context_id: Optional[str] = None,
+        strategy: str = "auto",
+    ) -> str:
+        """Smart delegation — single or multi-agent based on available matches.
+
+        Args:
+            subtask_description: What the subtask needs to do
+            tool_hints: Capability tags to match agents against
+            delegate_to: Preferred agent name (gets priority)
+            context_id: Parent task ID for correlation
+            strategy: "auto" | "race" | "fan_out"
+
+        Returns:
+            Result text from the best agent
+
+        Raises:
+            RuntimeError: If no agents match or all fail
+        """
+        matches = self.match(tool_hints)
+
+        # Prefer the named agent if specified and available
+        if delegate_to:
+            named = self._agents.get(delegate_to)
+            if named and named.get("enabled", True):
+                # Ensure named agent is first, deduplicate
+                matches = [{**named, "_name": delegate_to}] + [
+                    m for m in matches if m.get("_name") != delegate_to
+                ]
+
+        if not matches:
+            raise RuntimeError(f"No agents available for capabilities: {tool_hints}")
+
+        # Single agent — use existing delegate()
+        if len(matches) == 1:
+            return await self.delegate(matches[0], subtask_description, context_id)
+
+        # Multi-agent — pick strategy
+        if strategy == "auto":
+            strategy = "race"  # Default: speed wins
+
+        if strategy == "race":
+            return await self._race(matches[:3], subtask_description, context_id)
+        elif strategy == "fan_out":
+            return await self._fan_out(matches[:3], subtask_description, context_id)
+        else:
+            return await self.delegate(matches[0], subtask_description, context_id)
+
+    async def _race(
+        self,
+        agents: List[dict],
+        task_text: str,
+        context_id: Optional[str] = None,
+    ) -> str:
+        """Send task to all agents in parallel, return first successful result.
+
+        Good for speed-critical commodity work — whoever finishes first wins.
+        """
+        logger.info(f"AgentBroker: racing {len(agents)} agents for: {task_text[:60]}")
+
+        async def _try_one(agent_config: dict) -> Optional[str]:
+            try:
+                return await self.delegate(agent_config, task_text, context_id)
+            except Exception as e:
+                name = agent_config.get("_name", "unknown")
+                logger.warning(f"AgentBroker: race participant '{name}' failed: {e}")
+                return None
+
+        results = await asyncio.gather(*[_try_one(a) for a in agents])
+        for r in results:
+            if r:
+                return r
+        raise RuntimeError(f"All {len(agents)} agents failed in race delegation")
+
+    async def _fan_out(
+        self,
+        agents: List[dict],
+        task_text: str,
+        context_id: Optional[str] = None,
+    ) -> str:
+        """Send task to all agents, collect all results, merge with attribution.
+
+        Good for research — multiple perspectives produce better synthesis.
+        """
+        logger.info(f"AgentBroker: fan-out to {len(agents)} agents for: {task_text[:60]}")
+
+        async def _try_one(agent_config: dict) -> Optional[tuple]:
+            name = agent_config.get("_name", "unknown")
+            try:
+                result = await self.delegate(agent_config, task_text, context_id)
+                return (name, result)
+            except Exception as e:
+                logger.warning(f"AgentBroker: fan-out participant '{name}' failed: {e}")
+                return None
+
+        raw = await asyncio.gather(*[_try_one(a) for a in agents])
+        results = [r for r in raw if r is not None]
+
+        if not results:
+            raise RuntimeError(f"All {len(agents)} agents failed in fan-out delegation")
+        if len(results) == 1:
+            return results[0][1]
+
+        # Merge all results with source attribution
+        merged = "MULTI-AGENT RESULTS:\n\n"
+        for name, text in results:
+            merged += f"--- From {name} ---\n{text}\n\n"
+        return merged
 
     # ── Discovery ─────────────────────────────────────────────────────────────
 

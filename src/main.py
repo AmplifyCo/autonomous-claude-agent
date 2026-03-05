@@ -259,9 +259,10 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         agent.tools.register(clock_tool)
         logger.info("🕐 ClockTool registered (PST)")
 
-        # Initialize sub-agent spawner
+        # Initialize sub-agent spawner (share parent agent's tools for real capability)
         api_client = AnthropicClient(config.api_key)
         agent_factory = AgentFactory(api_client, config)
+        agent_factory.set_tools(agent.tools)  # Sub-agents inherit all registered tools
         orchestrator = Orchestrator(agent_factory)
 
         # Initialize auto-updater
@@ -611,6 +612,7 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 owner_whatsapp_number=_owner_wa,
                 episodic_memory=episodic_memory,
                 agent_broker=_broker,
+                orchestrator=orchestrator,
             )
             # Wire CriticAgent into ConversationManager for inline content reflection
             conversation_manager.critic = _critic

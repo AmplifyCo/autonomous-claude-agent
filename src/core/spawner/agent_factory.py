@@ -1,6 +1,12 @@
-"""Agent factory for creating sub-agent instances."""
+"""Agent factory for creating sub-agent instances.
+
+Creates lightweight SubAgents that share the parent agent's tools and API client.
+Each SubAgent runs its own ReAct loop with isolated message history, so multiple
+sub-agents can execute concurrently via asyncio.gather without interference.
+"""
 
 import logging
+import os
 from typing import List, Optional, Dict, Any
 
 from ..config import AgentConfig
@@ -164,6 +170,16 @@ class AgentFactory:
 
         logger.info("Initialized AgentFactory")
 
+    def set_tools(self, tools: ToolRegistry):
+        """Share parent agent's tool registry with sub-agents.
+
+        Call this after registering all tools on the parent agent so
+        sub-agents inherit the same capabilities (web_search, file_ops, etc.).
+        """
+        self.tools = tools
+        tool_count = len(tools.tools) if hasattr(tools, 'tools') else 0
+        logger.info(f"AgentFactory: shared {tool_count} tools from parent agent")
+
     async def create_agent(
         self,
         task: str,
@@ -193,33 +209,24 @@ class AgentFactory:
         )
 
     def _build_subagent_prompt(self, task: str, context: str) -> str:
-        """Build system prompt for sub-agent.
+        """Build system prompt for sub-agent with Nova's identity context."""
+        bot_name = os.getenv("BOT_NAME", "Nova")
+        owner_name = os.getenv("OWNER_NAME", "User")
 
-        Args:
-            task: Task description
-            context: Context from parent
-
-        Returns:
-            System prompt string
-        """
-        prompt = f"""You are a specialized sub-agent focused on: {task}
-
-Context from parent agent:
-{context if context else "No additional context provided"}
-
-Your goal is to complete this specific task autonomously and report back with:
-1. Summary of what was implemented/accomplished
-2. Files created or modified
-3. Any issues encountered
-4. Suggestions for improvements or next steps
-
-You have access to tools for file operations, bash commands, and web fetching.
-Work methodically and test your implementation before reporting completion.
-
-Important:
-- Be thorough and check your work
-- Handle errors gracefully
-- Report clear status updates
-- Only report completion when truly done"""
-
+        prompt = (
+            f"IDENTITY: You are a worker sub-agent of {bot_name}, {owner_name}'s AI assistant.\n"
+            f"You are executing one step of a larger task. Complete your step and report results.\n\n"
+        )
+        if context:
+            prompt += f"CONTEXT FROM PREVIOUS STEPS:\n{context}\n\n"
+        prompt += (
+            f"YOUR TASK: {task}\n\n"
+            f"RULES:\n"
+            f"- Complete this specific step only — don't attempt other steps\n"
+            f"- Use available tools to accomplish the task\n"
+            f"- Report what you found/did clearly and concisely\n"
+            f"- If a tool fails, try an alternative approach before giving up\n"
+            f"- Never mention technical internals (tool names, APIs) in user-facing content\n"
+            f"- When writing content as {owner_name}, maintain their voice and style\n"
+        )
         return prompt
