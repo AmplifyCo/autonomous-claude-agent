@@ -1,0 +1,21 @@
+{
+    "name": "wallet",
+    "version": "1.0",
+    "description": "Multi-chain crypto wallet for Base and Solana — holds and sends USDC",
+    "class_name": "WalletTool",
+    "module_file": "tool.py",
+    "risk_map": {
+        "balance": "read",
+        "address": "read",
+        "generate": "write",
+        "send": "irreversible",
+        "sign": "write",
+        "tx_status": "read",
+        "_default": "read"
+    },
+    "env_vars": ["WALLET_ENCRYPTION_KEY"],
+    "constructor_args": {"encryption_key": "WALLET_ENCRYPTION_KEY"},
+    "safe_readonly": false,
+    "persona": null,
+    "dependencies": ["web3", "eth-account", "solana", "solders", "base58"]
+}

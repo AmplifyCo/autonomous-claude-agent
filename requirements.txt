@@ -67,6 +67,13 @@ pytz>=2023.3
 #
 # For development:
 #   pip install pytest pytest-asyncio black ruff
+# Blockchain / Wallet / x402 / ERC-8004
+web3>=7.0.0
+eth-account>=0.13.0
+solana>=0.35.0
+solders>=0.25.0
+base58>=2.1.0
+
 twilio>=9.0.0
 python-multipart>=0.0.6
 playwright>=1.41.0

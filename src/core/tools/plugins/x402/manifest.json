@@ -1,0 +1,17 @@
+{
+    "name": "x402",
+    "version": "1.0",
+    "description": "x402 protocol client — automatically pay for HTTP 402 gated resources using USDC",
+    "class_name": "X402Tool",
+    "module_file": "tool.py",
+    "risk_map": {
+        "check": "read",
+        "pay_and_fetch": "irreversible",
+        "_default": "write"
+    },
+    "env_vars": ["WALLET_ENCRYPTION_KEY"],
+    "constructor_args": {"encryption_key": "WALLET_ENCRYPTION_KEY"},
+    "safe_readonly": false,
+    "persona": null,
+    "dependencies": ["web3", "aiohttp"]
+}

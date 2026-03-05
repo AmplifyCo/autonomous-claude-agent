@@ -1,0 +1,19 @@
+{
+    "name": "erc8004",
+    "version": "1.0",
+    "description": "ERC-8004 on-chain agent identity — register handle, resolve, verify",
+    "class_name": "ERC8004Tool",
+    "module_file": "tool.py",
+    "risk_map": {
+        "resolve": "read",
+        "verify": "read",
+        "my_identity": "read",
+        "register": "irreversible",
+        "_default": "read"
+    },
+    "env_vars": ["WALLET_ENCRYPTION_KEY"],
+    "constructor_args": {"encryption_key": "WALLET_ENCRYPTION_KEY"},
+    "safe_readonly": false,
+    "persona": null,
+    "dependencies": ["web3"]
+}
