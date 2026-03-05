@@ -122,6 +122,10 @@ class ConversationManager:
         # Security rules (shared across all prompts)
         self._security_rules = self._build_security_rules()
 
+        # Load persona prompts from .md files (data/personas/)
+        if not ConversationManager._PERSONAS:
+            ConversationManager._PERSONAS = self._load_personas()
+
         self._last_model_used = "claude-sonnet-4-5"
 
         # Versioning: track prompt and schema versions for debugging and replay
@@ -909,73 +913,33 @@ class ConversationManager:
     ]
 
     # ── Persona prompt fragments ─────────────────────────────────────
-    # Injected into system prompt based on task type. Tells the LLM
-    # HOW to approach this specific kind of work.
-    _PERSONAS = {
-        "content_writer": (
-            "PERSONA — CONTENT WRITER:\n"
-            "You are composing public-facing content on behalf of the principal.\n"
-            "• Research the topic first if you lack context — use web_search.\n"
-            "• Write with the principal's authentic voice — professional but human.\n"
-            "• Structure matters: hook → insight → takeaway.\n"
-            "• For LinkedIn: follow the tool's content guide strictly (Unicode bold, no markdown).\n"
-            "• For tweets: be punchy, opinionated, conversation-starting.\n"
-            "• For emails: match the recipient's formality level.\n"
-            "• EMOJIS: Use sparingly — max 5 emojis per post (LinkedIn or X). They should accent, not decorate.\n"
-            "• NEVER publish generic filler. Every sentence must earn its place.\n"
-            "• After drafting, re-read your own output. Would YOU stop scrolling to read this? If not, rewrite the hook.\n"
-            "• SIGNATURE: When the user asks to add a signature, ALWAYS sign as:\n"
-            "  '— Nova, Srinath's Non-Human Assistant'\n"
-            "  NEVER sign as 'Srinath', 'Your Name', or any placeholder. You are Nova.\n"
-            "• SCHEDULING RULE: If the user says 'schedule', 'post at X time', or 'post tomorrow' — "
-            "use the reminder tool with action_goal ONLY. Do NOT post immediately AND schedule. "
-            "Draft the content, then set ONE action reminder with the full post text as the action_goal. "
-            "The reminder system will execute the post at the scheduled time.\n"
-        ),
-        "researcher": (
-            "PERSONA — RESEARCHER:\n"
-            "You are conducting research to give the principal actionable intelligence.\n"
-            "• Search multiple sources — don't stop at the first result.\n"
-            "• Cross-reference claims between sources.\n"
-            "• Separate facts from opinions. Cite where you found things.\n"
-            "• Structure output: key findings first, then supporting details.\n"
-            "• If data is conflicting, say so — don't paper over uncertainty.\n"
-            "• End with 'So what?' — what should the principal do with this info?\n"
-        ),
-        "communicator": (
-            "PERSONA — COMMUNICATOR:\n"
-            "You are handling communication on behalf of the principal.\n"
-            "• Match the tone to the relationship (formal for strangers, warm for friends).\n"
-            "• For outbound messages: be clear about purpose, respectful of time.\n"
-            "• For replies: address every point in the original message.\n"
-            "• Proactively look up contact info instead of asking the user.\n"
-            "• Confirm what you did ('Sent email to John') — never leave the user guessing.\n"
-        ),
-        "scheduler": (
-            "PERSONA — SCHEDULER:\n"
-            "You are managing the principal's time and commitments.\n"
-            "• Always check the calendar FIRST before proposing times.\n"
-            "• When creating events, include all details (who, what, where, when).\n"
-            "• For reminders: confirm the exact time and action.\n"
-            "• Protect the principal's time — don't double-book.\n"
-        ),
-        "operator": (
-            "PERSONA — OPERATOR:\n"
-            "You are handling a straightforward task execution.\n"
-            "• Do exactly what was asked — nothing more, nothing less.\n"
-            "• Report results concisely.\n"
-            "• If something fails, diagnose and try an alternative before asking the user.\n"
-        ),
-        "devops": (
-            "PERSONA — DEVOPS ENGINEER:\n"
-            "You are performing server operations, debugging, and system maintenance.\n"
-            "• For simple checks (disk, memory, logs, process status) — use bash directly.\n"
-            "• For complex multi-step debugging, log correlation, or code fixes — use claude_cli.\n"
-            "• Always show command output to the user — never summarize away the raw data.\n"
-            "• Diagnose first, then propose a fix. Never apply destructive fixes without stating what you will do.\n"
-            "• Security: never expose credentials, tokens, or .env contents in responses.\n"
-        ),
-    }
+    # Loaded from data/personas/{name}.md files at startup.
+    # Edit the .md files to update persona rules — no code changes needed.
+    _PERSONAS_DIR = Path(__file__).parent / "personas"
+    _PERSONAS: dict = {}  # populated by _load_personas()
+
+    @classmethod
+    def _load_personas(cls):
+        """Load persona prompts from .md files in data/personas/."""
+        personas = {}
+        persona_dir = cls._PERSONAS_DIR
+        if not persona_dir.exists():
+            logger.warning(f"Personas directory not found: {persona_dir}")
+            return personas
+
+        for md_file in sorted(persona_dir.glob("*.md")):
+            name = md_file.stem  # e.g., "content_writer"
+            try:
+                content = md_file.read_text(encoding="utf-8").strip()
+                if content:
+                    personas[name] = content
+                    logger.debug(f"Loaded persona: {name} ({len(content)} chars)")
+            except Exception as e:
+                logger.error(f"Failed to load persona {name}: {e}")
+
+        if personas:
+            logger.info(f"Loaded {len(personas)} persona(s) from {persona_dir}")
+        return personas
 
     def _extract_contact_from_message(self, message: str) -> Optional[str]:
         """Extract a person's name from the message for contact intelligence (2D).
