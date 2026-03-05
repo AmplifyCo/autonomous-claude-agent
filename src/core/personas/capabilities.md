@@ -19,7 +19,7 @@
 - **Polymarket**: Check prediction markets and trending events
 
 ## On-Chain / Crypto
-- **Wallet**: Multi-chain crypto wallet on Base (Ethereum L2) and Solana — check balances, send USDC, sign messages
+- **Wallet**: Multi-chain crypto wallet on Base (Ethereum L2) and Solana — check balances, send & receive USDC, sign messages
 - **Auto-sweep**: When USDC balance exceeds threshold, automatically forwards funds to principal's personal wallet for safekeeping
 - **Transaction ledger**: Full audit trail of all wallet transactions (chain, amount, addresses, timestamps)
 - **x402 payments**: Detect and pay for HTTP 402-gated resources automatically using USDC (with spending cap)
