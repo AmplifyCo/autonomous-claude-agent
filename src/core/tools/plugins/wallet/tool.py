@@ -1,6 +1,8 @@
 """Wallet plugin — multi-chain crypto wallet for Base and Solana USDC."""
 
 import logging
+import os
+import time
 
 from src.core.tools.base import BaseTool
 from src.core.types import ToolResult
@@ -12,6 +14,11 @@ from src.core.tools.plugins.wallet.chains.solana_chain import SolanaChain
 logger = logging.getLogger(__name__)
 
 SUPPORTED_CHAINS = ("base", "solana")
+
+# Spending limits — configurable via env vars
+MAX_SEND_PER_TX = float(os.getenv("WALLET_MAX_PER_TX", "10"))       # Max USDC per single send
+MAX_SEND_PER_DAY = float(os.getenv("WALLET_MAX_PER_DAY", "50"))     # Max USDC per 24h window
+OWNER_ADDRESS = os.getenv("WALLET_OWNER_ADDRESS", "")                # Whitelisted owner address (unlimited)
 
 
 class WalletTool(BaseTool):
@@ -61,6 +68,8 @@ class WalletTool(BaseTool):
             self._keystore = WalletKeystore(encryption_key)
         self._base = BaseChain()
         self._solana = SolanaChain()
+        # Spending tracker: list of (timestamp, amount) for rolling 24h window
+        self._spend_log: list = []
 
     def _chain_adapter(self, chain: str):
         if chain == "base":
@@ -128,11 +137,45 @@ class WalletTool(BaseTool):
 
         return ToolResult(success=True, output=output, metadata={"chain": chain, **balances})
 
+    def _check_spending_limits(self, to: str, amount: float) -> str:
+        """Check per-tx and daily spending limits. Returns error message or empty string."""
+        # Owner address bypasses limits
+        if OWNER_ADDRESS and to.lower() == OWNER_ADDRESS.lower():
+            return ""
+
+        # Per-transaction limit
+        if amount > MAX_SEND_PER_TX:
+            return (
+                f"Amount {amount} USDC exceeds per-transaction limit of {MAX_SEND_PER_TX} USDC. "
+                f"Set WALLET_MAX_PER_TX env var to adjust."
+            )
+
+        # Rolling 24h window
+        now = time.time()
+        cutoff = now - 86400
+        self._spend_log = [(t, a) for t, a in self._spend_log if t > cutoff]
+        spent_today = sum(a for _, a in self._spend_log)
+
+        if spent_today + amount > MAX_SEND_PER_DAY:
+            return (
+                f"Daily limit would be exceeded: {spent_today:.2f} already spent + {amount} = "
+                f"{spent_today + amount:.2f} USDC (limit: {MAX_SEND_PER_DAY} USDC/day). "
+                f"Set WALLET_MAX_PER_DAY env var to adjust."
+            )
+
+        return ""
+
     async def _send(self, chain: str, to: str, amount: float) -> ToolResult:
         if not to:
             return ToolResult(success=False, error="Missing 'to' address")
         if not amount or amount <= 0:
             return ToolResult(success=False, error="Amount must be positive")
+
+        # Enforce spending limits
+        limit_error = self._check_spending_limits(to, amount)
+        if limit_error:
+            logger.warning(f"Wallet send blocked: {limit_error}")
+            return ToolResult(success=False, error=limit_error)
 
         private_key = self._keystore.get_private_key(chain)
         if not private_key:
@@ -140,6 +183,10 @@ class WalletTool(BaseTool):
 
         adapter = self._chain_adapter(chain)
         tx_hash = await adapter.send_usdc(private_key, to, amount)
+
+        # Record spend
+        self._spend_log.append((time.time(), amount))
+        logger.info(f"Wallet sent {amount} USDC on {chain} to {to} (tx: {tx_hash})")
 
         return ToolResult(
             success=True,
