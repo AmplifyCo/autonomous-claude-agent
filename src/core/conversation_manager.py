@@ -122,9 +122,11 @@ class ConversationManager:
         # Security rules (shared across all prompts)
         self._security_rules = self._build_security_rules()
 
-        # Load persona prompts from .md files (data/personas/)
+        # Load persona prompts and capabilities from .md files (src/core/personas/)
         if not ConversationManager._PERSONAS:
             ConversationManager._PERSONAS = self._load_personas()
+        if not ConversationManager._CAPABILITIES:
+            ConversationManager._CAPABILITIES = self._load_capabilities()
 
         self._last_model_used = "claude-sonnet-4-5"
 
@@ -917,6 +919,7 @@ class ConversationManager:
     # Edit the .md files to update persona rules — no code changes needed.
     _PERSONAS_DIR = Path(__file__).parent / "personas"
     _PERSONAS: dict = {}  # populated by _load_personas()
+    _CAPABILITIES: str = ""  # populated from capabilities.md
 
     @classmethod
     def _load_personas(cls):
@@ -936,6 +939,18 @@ class ConversationManager:
                     logger.debug(f"Loaded persona: {name} ({len(content)} chars)")
             except Exception as e:
                 logger.error(f"Failed to load persona {name}: {e}")
+
+    @classmethod
+    def _load_capabilities(cls) -> str:
+        """Load capabilities from capabilities.md."""
+        cap_path = cls._PERSONAS_DIR / "capabilities.md"
+        try:
+            content = cap_path.read_text(encoding="utf-8").strip()
+            logger.debug("Capabilities loaded from %s (%d chars)", cap_path, len(content))
+            return content
+        except FileNotFoundError:
+            logger.warning("capabilities.md not found at %s", cap_path)
+            return ""
 
         if personas:
             logger.info(f"Loaded {len(personas)} persona(s) from {persona_dir}")
@@ -3835,21 +3850,7 @@ IDENTITY & REPRESENTATION:
 - For scheduling requests, check the calendar first, then respond with availability.
 - For low-stakes confirmations, just handle it. For high-stakes decisions, say "Let me check and get back to you."
 
-YOUR CAPABILITIES (what you can do for {self.owner_name}):
-- Email: Read inbox, send emails, manage drafts
-- Calendar: Check schedule, create/modify events, find availability
-- LinkedIn: Write and publish posts, manage professional content
-- X (Twitter): Compose and post tweets, share updates
-- WhatsApp: Send messages to contacts on {self.owner_name}'s behalf
-- Phone calls: Make voice calls, hold autonomous conversations (reservations, inquiries, follow-ups)
-- Reminders: Set time-based or event-based reminders, with optional auto-actions
-- Contacts: Save, search, and manage contact details
-- Web research: Search the web, browse pages, gather information
-- File management: Read, write, and organize files
-- Polymarket: Check prediction markets and trending events
-- Background tasks: Queue and manage multi-step tasks that run autonomously
-- Learn new skills: Acquire new API integrations from specification files
-When asked "what can you do?", describe these capabilities in natural, friendly language. Never list tool names.
+{self._CAPABILITIES}
 
 SKILL AWARENESS (CRITICAL):
 - When asked to interact with an unfamiliar platform or service (one you don't have a dedicated tool for), FIRST check if that platform provides an API spec at their website (e.g. example.com/skill.md or example.com/api-spec). If a spec exists, use your skill-learning capability to learn it and build a proper integration — do NOT resort to raw bash/curl commands as a workaround.
