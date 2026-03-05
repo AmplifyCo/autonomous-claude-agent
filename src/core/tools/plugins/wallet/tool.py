@@ -16,6 +16,7 @@ from src.core.types import ToolResult
 from src.core.tools.plugins.wallet.keystore import WalletKeystore
 from src.core.tools.plugins.wallet.chains.base_chain import BaseChain
 from src.core.tools.plugins.wallet.chains.solana_chain import SolanaChain
+from src.core.tools.plugins.wallet.ledger import WalletLedger
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,14 @@ class WalletTool(BaseTool):
         "balance (check ETH/SOL + USDC), send (request USDC transfer — requires owner approval), "
         "confirm_send (execute a previously approved transfer), "
         "sweep (forward USDC above threshold to owner's personal wallet), "
+        "ledger (view transaction history), "
         "sign (sign a message), tx_status (check transaction)."
     )
     parameters = {
         "operation": {
             "type": "string",
             "description": "Wallet operation to perform",
-            "enum": ["generate", "address", "balance", "send", "confirm_send", "sweep", "sign", "tx_status"],
+            "enum": ["generate", "address", "balance", "send", "confirm_send", "sweep", "ledger", "sign", "tx_status"],
         },
         "chain": {
             "type": "string",
@@ -90,6 +92,7 @@ class WalletTool(BaseTool):
             self._keystore = WalletKeystore(encryption_key)
         self._base = BaseChain()
         self._solana = SolanaChain()
+        self._ledger = WalletLedger()
         # Spending tracker: list of (timestamp, amount) for rolling 24h window
         self._spend_log: list = []
         # Pending transfers awaiting owner approval: {code: {chain, to, amount, created_at}}
@@ -122,6 +125,8 @@ class WalletTool(BaseTool):
                 return await self._confirm_send(kwargs.get("approval_code", ""))
             elif operation == "sweep":
                 return await self._sweep(chain)
+            elif operation == "ledger":
+                return await self._ledger_query(chain, kwargs.get("limit", 10))
             elif operation == "sign":
                 return await self._sign(chain, kwargs.get("message", ""))
             elif operation == "tx_status":
@@ -290,8 +295,10 @@ class WalletTool(BaseTool):
         adapter = self._chain_adapter(chain)
         tx_hash = await adapter.send_usdc(private_key, to, amount)
 
-        # Record spend
+        # Record spend + ledger
         self._spend_log.append((time.time(), amount))
+        from_addr = self._keystore.get_address(chain) or "unknown"
+        self._ledger.record(chain, "send", from_addr, to, amount, tx_hash=tx_hash)
         logger.info(f"Wallet APPROVED send: {amount} USDC on {chain} to {to} (tx: {tx_hash})")
 
         return ToolResult(
@@ -342,6 +349,7 @@ class WalletTool(BaseTool):
             return ToolResult(success=False, error=f"No {chain} wallet key.")
 
         tx_hash = await adapter.send_usdc(private_key, owner_addr, sweep_amount)
+        self._ledger.record(chain, "sweep", address, owner_addr, sweep_amount, tx_hash=tx_hash, note="auto-sweep to owner")
         logger.info(
             f"Wallet SWEEP: {sweep_amount:.2f} USDC on {chain} → owner ({owner_addr}) tx: {tx_hash}"
         )
@@ -356,6 +364,27 @@ class WalletTool(BaseTool):
             ),
             metadata={"chain": chain, "tx_hash": tx_hash, "amount": sweep_amount, "to": owner_addr},
         )
+
+    async def _ledger_query(self, chain: str, limit: int = 10) -> ToolResult:
+        """Show recent transaction history."""
+        # Pass chain=None to show all chains, or filter by specific chain
+        filter_chain = chain if chain in SUPPORTED_CHAINS else None
+        entries = self._ledger.get_recent(limit=limit, chain=filter_chain)
+        summary = self._ledger.get_summary(chain=filter_chain)
+
+        formatted = self._ledger.format_entries(entries)
+        chain_label = chain if filter_chain else "all chains"
+
+        output = (
+            f"Transaction Ledger ({chain_label}) — last {limit}:\n\n"
+            f"{formatted}\n\n"
+            f"Summary: {summary['total_transactions']} txns | "
+            f"Sent: {summary['total_sent']} USDC | "
+            f"Received: {summary['total_received']} USDC | "
+            f"Net: {summary['net']} USDC"
+        )
+
+        return ToolResult(success=True, output=output, metadata=summary)
 
     async def _notify_owner_approval(self, chain: str, to: str, amount: float, code: str):
         """Send approval request to owner via Telegram."""
