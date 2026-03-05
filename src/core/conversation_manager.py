@@ -923,6 +923,10 @@ class ConversationManager:
             "• For emails: match the recipient's formality level.\n"
             "• NEVER publish generic filler. Every sentence must earn its place.\n"
             "• After drafting, re-read your own output. Would YOU stop scrolling to read this? If not, rewrite the hook.\n"
+            "• SCHEDULING RULE: If the user says 'schedule', 'post at X time', or 'post tomorrow' — "
+            "use the reminder tool with action_goal ONLY. Do NOT post immediately AND schedule. "
+            "Draft the content, then set ONE action reminder with the full post text as the action_goal. "
+            "The reminder system will execute the post at the scheduled time.\n"
         ),
         "researcher": (
             "PERSONA — RESEARCHER:\n"
@@ -3560,6 +3564,20 @@ Examples:
             )
             task += research_directive
             logger.info("Research-before-write directive injected for topic-based content")
+
+        # ── Scheduling directive: "post at X time" = reminder only, not immediate post ─
+        _sched_keywords = {"schedule", "post at", "post tomorrow", "at 8", "at 9", "at 10", "at noon", "in the morning", "tonight"}
+        _msg_lower = message.lower()
+        if any(kw in _msg_lower for kw in _sched_keywords) and "reminder" in str(tool_hints):
+            task += (
+                "\n\nSCHEDULING RULE (CRITICAL):\n"
+                "The user wants this posted at a FUTURE time — NOT now.\n"
+                "1. Draft the content.\n"
+                "2. Use the reminder tool with action_goal containing the FULL post text and tool instructions.\n"
+                "3. Do NOT call the posting tool (linkedin, x_tool, etc.) directly. The reminder system will execute it at the scheduled time.\n"
+                "4. Confirm to the user: 'Scheduled for [time]. I'll post it then.'\n"
+            )
+            logger.info("Scheduling directive injected — reminder-only mode for future post")
 
         # ── Strategy recall: proven approaches for similar tasks ─────────
         if self.episodic_memory:
