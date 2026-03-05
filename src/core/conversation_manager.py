@@ -2048,8 +2048,10 @@ User says "good morning" → none"""
             try:
                 prompt = (
                     f"Compress the following into a concise version. "
-                    f"Preserve ALL key facts, names, numbers, URLs, decisions, "
+                    f"Preserve ALL key facts, names, numbers, decisions, "
                     f"and action items — drop only filler words and redundancy. "
+                    f"Keep URLs intact but shorten them to just the domain+path "
+                    f"(e.g. 'moltbook.com/claim/...' instead of the full URL). "
                     f"Do NOT omit any specific detail:\n\n{text}"
                 )
                 resp = await self.gemini_client.create_message(
