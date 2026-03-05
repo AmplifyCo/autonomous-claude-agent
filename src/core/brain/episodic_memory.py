@@ -52,8 +52,8 @@ class EpisodicMemory:
         who = ", ".join(participants) if participants else "nobody specific"
 
         # Trim to avoid storing raw sensitive content
-        outcome_safe = outcome.strip()[:200]
-        context_safe = (context or "").strip()[:100]
+        outcome_safe = outcome.strip()[:500]
+        context_safe = (context or "").strip()[:300]
 
         text = (
             f"Episode [{ts[:10]}]: {action}\n"

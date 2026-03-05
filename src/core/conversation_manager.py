@@ -1749,8 +1749,8 @@ RULES:
                     "or known fact from context above, naturally reference it "
                     "('Since you prefer...', 'You mentioned...'). Never fabricate."
                 )
-                if len(brain_text) > 1800:
-                    brain_text = brain_text[:1800] + "\n[context truncated]"
+                if len(brain_text) > 4000:
+                    brain_text = brain_text[:4000] + "\n[context truncated]"
                 system_prompt += "\n\n" + brain_text
 
             # Inject tone adaptation from current message
@@ -2086,10 +2086,10 @@ User says "good morning" → none"""
                 if not content:
                     continue
                 if role == "user":
-                    user_text = content[:200] + "…" if len(content) > 200 else content
+                    user_text = content[:500] + "…" if len(content) > 500 else content
                     history_lines.append(f"User: {user_text}")
                 elif role == "assistant":
-                    bot_text = content[:600] + "…" if len(content) > 600 else content
+                    bot_text = content[:1200] + "…" if len(content) > 1200 else content
                     history_lines.append(f"{self.bot_name}: {bot_text}")
             if history_lines:
                 return "\n".join(history_lines)
@@ -2104,11 +2104,11 @@ User says "good morning" → none"""
                 user_msg = turn.get("user_message", "")
                 bot_msg = turn.get("assistant_response", "")
                 if user_msg:
-                    user_text = user_msg[:200] + "…" if len(user_msg) > 200 else user_msg
+                    user_text = user_msg[:500] + "…" if len(user_msg) > 500 else user_msg
                     history_lines.append(f"User: {user_text}")
                 if bot_msg:
                     if "bot_compressed" not in turn:
-                        turn["bot_compressed"] = await self._compress_turn_text(bot_msg, 600)
+                        turn["bot_compressed"] = await self._compress_turn_text(bot_msg, 1200)
                     history_lines.append(f"{self.bot_name}: {turn['bot_compressed']}")
             if history_lines:
                 return "\n".join(history_lines)
@@ -2132,10 +2132,10 @@ User says "good morning" → none"""
                 user_msg = turn.get("user_message", "")
                 bot_msg = turn.get("assistant_response", "")
                 if user_msg:
-                    user_text = user_msg[:200] + "…" if len(user_msg) > 200 else user_msg
+                    user_text = user_msg[:500] + "…" if len(user_msg) > 500 else user_msg
                     history_lines.append(f"User: {user_text}")
                 if bot_msg:
-                    history_lines.append(f"{self.bot_name}: {await self._compress_turn_text(bot_msg, 600)}")
+                    history_lines.append(f"{self.bot_name}: {await self._compress_turn_text(bot_msg, 1200)}")
 
             return "\n".join(history_lines)
         except Exception as e:
@@ -3356,8 +3356,8 @@ Examples:
             "2. NEED: What information am I missing? (1-2 sentences)\n"
             "3. APPROACH: Best sequence of actions? (numbered list, 3 max)\n"
             "4. RISK: What could go wrong? (1 sentence)\n\n"
-            f"Task: {message[:500]}\n"
-            f"Context: {brain_context[:500]}\n"
+            f"Task: {message[:1000]}\n"
+            f"Context: {brain_context[:1500]}\n"
             f"Available tools: {tool_str}\n\n"
             "Respond in the format above. Be concise — this is planning, not execution."
         )
@@ -3517,7 +3517,7 @@ Examples:
                     filter_metadata={"type": "communication_style"}
                 )
                 if style_results:
-                    examples = "\n\n---\n\n".join(r["text"][:500] for r in style_results)
+                    examples = "\n\n---\n\n".join(r["text"][:1000] for r in style_results)
                     task += (
                         f"\n\nSTYLE EXAMPLES (principal's actual past {platform} posts — match this voice):\n"
                         f"{examples}\n\n"
