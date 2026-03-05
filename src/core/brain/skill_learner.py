@@ -263,9 +263,9 @@ class SkillLearner:
             and not os.getenv(v)
         ]
 
-        # Step 6b: Try self-registration if API has unauthenticated register endpoint
-        if missing_env and self.credential_store:
-            reg_result = await self._try_self_registration(parsed, missing_env)
+        # Step 6b: LLM reads the spec, figures out registration, executes it
+        if missing_env and self.credential_store and self.llm:
+            reg_result = await self._try_self_registration(parsed, missing_env, content)
             if reg_result:
                 # Re-check after registration saved credentials
                 missing_env = [
@@ -617,99 +617,155 @@ class SkillLearner:
         return False
 
     async def _try_self_registration(
-        self, spec: ParsedSpec, missing_env: List[str]
+        self, spec: ParsedSpec, missing_env: List[str], raw_spec: str
     ) -> bool:
-        """Attempt autonomous registration if spec has an unauthenticated register endpoint.
+        """Use LLM to read the spec, understand registration, and execute it.
 
-        Looks for register/signup operations that don't require auth.
-        If found, calls the endpoint and saves the obtained API key.
+        Instead of keyword matching, asks Gemini to read the raw API spec and
+        figure out: (1) is there a registration endpoint? (2) what URL/method/body?
+        (3) which response field contains the API key?
 
-        Returns True if any credential was obtained and saved.
+        Then executes the registration call and saves the credential.
+
+        Returns True if credential was obtained and saved.
         """
-        # Find registration-like endpoints that are unauthenticated
-        register_ops = [
-            op for op in spec.operations
-            if any(kw in op.get("name", "").lower() for kw in ("register", "signup", "create_account"))
-            and op.get("method", "").upper() == "POST"
-        ]
-
-        if not register_ops:
-            return False
-
         bot_name = os.getenv("BOT_NAME", "Nova")
         owner_name = os.getenv("OWNER_NAME", "User")
-        logger.info(f"SkillLearner: attempting self-registration on {spec.name} as {bot_name}")
 
-        for op in register_ops:
-            try:
-                url = f"{spec.base_url.rstrip('/')}{op['path']}"
-                # Build registration payload from body_fields OR params
-                fields = op.get("body_fields") or op.get("params") or {}
-                body = {}
-                for field_name, field_desc in fields.items():
-                    fl = field_name.lower()
-                    if "name" in fl or "username" in fl:
-                        body[field_name] = bot_name
-                    elif "description" in fl or "bio" in fl or "about" in fl:
-                        body[field_name] = f"AI assistant for {owner_name}. Autonomous agent powered by Claude."
-                    elif "bot" in fl or "is_bot" in fl or "type" in fl:
-                        body[field_name] = True
-                    elif "email" in fl:
-                        body[field_name] = f"{bot_name.lower()}@agent.local"
-                    elif "url" in fl or "website" in fl:
-                        body[field_name] = ""
+        # Ask LLM to analyze the spec and produce an executable registration plan
+        prompt = (
+            f"You are an AI agent named {bot_name}. You need to register yourself on this API.\n\n"
+            f"Read this API specification and determine:\n"
+            f"1. Is there a registration/signup endpoint that does NOT require authentication?\n"
+            f"2. If yes, what is the exact URL, HTTP method, and JSON body to send?\n"
+            f"3. Which field in the response contains the API key/token?\n\n"
+            f"My details for registration:\n"
+            f"- name: {bot_name}\n"
+            f"- description: AI assistant for {owner_name}. Autonomous agent powered by Claude.\n\n"
+            f"API BASE URL: {spec.base_url}\n\n"
+            f"API SPEC:\n{raw_spec[:6000]}\n\n"
+            f"Return ONLY valid JSON (no markdown fences). If no registration endpoint exists, "
+            f"return: {{\"can_register\": false}}\n"
+            f"If registration is possible, return:\n"
+            f"{{\n"
+            f'  "can_register": true,\n'
+            f'  "url": "full URL to call",\n'
+            f'  "method": "POST",\n'
+            f'  "headers": {{"Content-Type": "application/json"}},\n'
+            f'  "body": {{...exact JSON body to send...}},\n'
+            f'  "api_key_field": "field name in response that contains the API key (e.g. api_key, token)"\n'
+            f"}}"
+        )
 
-                # Fallback: if no fields parsed, try common registration fields
-                if not body:
-                    body = {"name": bot_name, "description": f"AI assistant for {owner_name}"}
-                    logger.debug(f"No body_fields parsed, using fallback: {body}")
+        try:
+            resp = await asyncio.wait_for(
+                self.llm.create_message(
+                    model="gemini/gemini-2.0-flash",
+                    messages=[{"role": "user", "content": prompt}],
+                    system="You are a precise API integration assistant. Output only valid JSON.",
+                    max_tokens=1000,
+                ),
+                timeout=15.0,
+            )
+            text = ""
+            if hasattr(resp, 'content') and resp.content:
+                for block in resp.content:
+                    if hasattr(block, 'text'):
+                        text += block.text
+            text = text.strip().replace("```json", "").replace("```", "").strip()
 
-                logger.info(f"SkillLearner: registering at {url} with body keys: {list(body.keys())}")
+            plan = json.loads(text)
+            if not plan.get("can_register"):
+                logger.info(f"SkillLearner: LLM says no registration endpoint for {spec.name}")
+                return False
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        url,
-                        json=body,
-                        timeout=aiohttp.ClientTimeout(total=15),
-                        headers={"Content-Type": "application/json"},
-                    ) as resp:
-                        if resp.status in (200, 201):
-                            data = await resp.json()
-                            # Look for API key in response (check nested too)
-                            api_key = (
-                                data.get("api_key")
-                                or data.get("apiKey")
-                                or data.get("token")
-                                or data.get("access_token")
-                                or data.get("key")
-                                or (data.get("data", {}) or {}).get("api_key")
-                                or (data.get("data", {}) or {}).get("token")
+            reg_url = plan["url"]
+            method = plan.get("method", "POST").upper()
+            headers = plan.get("headers", {"Content-Type": "application/json"})
+            body = plan.get("body", {})
+            api_key_field = plan.get("api_key_field", "api_key")
+
+            logger.info(
+                f"SkillLearner: LLM registration plan for {spec.name} → "
+                f"{method} {reg_url} body_keys={list(body.keys())} "
+                f"api_key_field={api_key_field}"
+            )
+
+        except Exception as e:
+            logger.warning(f"SkillLearner: LLM registration analysis failed: {e}")
+            return False
+
+        # Execute the registration call
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(
+                    method=method,
+                    url=reg_url,
+                    json=body if body else None,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers=headers,
+                ) as resp:
+                    resp_text = await resp.text()
+                    logger.info(
+                        f"SkillLearner: registration response {resp.status}: {resp_text[:500]}"
+                    )
+
+                    if resp.status in (200, 201):
+                        try:
+                            data = json.loads(resp_text)
+                        except json.JSONDecodeError:
+                            logger.warning("Registration response is not JSON")
+                            return False
+
+                        # Extract API key using LLM-specified field, with fallback search
+                        api_key = self._extract_api_key(data, api_key_field)
+
+                        if api_key and spec.env_var_name:
+                            self.credential_store.set(
+                                spec.env_var_name,
+                                str(api_key),
+                                source=f"self_registration:{spec.name}",
                             )
-                            if api_key and spec.env_var_name:
-                                self.credential_store.set(
-                                    spec.env_var_name,
-                                    str(api_key),
-                                    source=f"self_registration:{spec.name}",
-                                )
-                                logger.info(
-                                    f"SkillLearner: self-registered on {spec.name}, "
-                                    f"saved {spec.env_var_name}"
-                                )
-                                return True
-                            else:
-                                logger.info(
-                                    f"Registration returned 200 but no API key found in response. "
-                                    f"Keys: {list(data.keys())}"
-                                )
-                        else:
-                            body_text = await resp.text()
                             logger.info(
-                                f"Self-registration failed ({resp.status}): {body_text[:300]}"
+                                f"SkillLearner: self-registered on {spec.name}, "
+                                f"saved {spec.env_var_name}"
                             )
-            except Exception as e:
-                logger.warning(f"Self-registration attempt failed: {e}")
+                            return True
+                        else:
+                            logger.info(
+                                f"Registration succeeded but no API key found. "
+                                f"Looked for '{api_key_field}' in: {list(data.keys())}"
+                            )
+                    else:
+                        logger.info(f"Self-registration failed ({resp.status}): {resp_text[:300]}")
+        except Exception as e:
+            logger.warning(f"Self-registration request failed: {e}")
 
         return False
+
+    @staticmethod
+    def _extract_api_key(data: dict, field_hint: str) -> Optional[str]:
+        """Extract API key from response using LLM hint + fallback search."""
+        # Direct field
+        if field_hint in data:
+            return str(data[field_hint])
+
+        # Nested under common wrappers
+        for wrapper in ("data", "result", "response", "agent"):
+            nested = data.get(wrapper)
+            if isinstance(nested, dict) and field_hint in nested:
+                return str(nested[field_hint])
+
+        # Fallback: search common key names at any level
+        for key in ("api_key", "apiKey", "token", "access_token", "key", "secret"):
+            if key in data:
+                return str(data[key])
+            for wrapper in ("data", "result", "response", "agent"):
+                nested = data.get(wrapper)
+                if isinstance(nested, dict) and key in nested:
+                    return str(nested[key])
+
+        return None
 
     # ── Metadata persistence ─────────────────────────────────────────────
 
