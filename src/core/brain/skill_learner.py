@@ -695,53 +695,147 @@ class SkillLearner:
             logger.warning(f"SkillLearner: LLM registration analysis failed: {e}")
             return False
 
-        # Execute the registration call
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.request(
-                    method=method,
-                    url=reg_url,
-                    json=body if body else None,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                    headers=headers,
-                ) as resp:
-                    resp_text = await resp.text()
-                    logger.info(
-                        f"SkillLearner: registration response {resp.status}: {resp_text[:500]}"
-                    )
+        # Execute registration with LLM-driven retry on failure
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.request(
+                        method=method,
+                        url=reg_url,
+                        json=body if body else None,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                        headers=headers,
+                    ) as resp:
+                        resp_text = await resp.text()
+                        logger.info(
+                            f"SkillLearner: registration attempt {attempt+1} "
+                            f"response {resp.status}: {resp_text[:500]}"
+                        )
 
-                    if resp.status in (200, 201):
-                        try:
-                            data = json.loads(resp_text)
-                        except json.JSONDecodeError:
-                            logger.warning("Registration response is not JSON")
-                            return False
+                        if resp.status in (200, 201):
+                            try:
+                                data = json.loads(resp_text)
+                            except json.JSONDecodeError:
+                                logger.warning("Registration response is not JSON")
+                                return False
 
-                        # Extract API key using LLM-specified field, with fallback search
-                        api_key = self._extract_api_key(data, api_key_field)
+                            api_key = self._extract_api_key(data, api_key_field)
 
-                        if api_key and spec.env_var_name:
-                            self.credential_store.set(
-                                spec.env_var_name,
-                                str(api_key),
-                                source=f"self_registration:{spec.name}",
+                            if api_key and spec.env_var_name:
+                                self.credential_store.set(
+                                    spec.env_var_name,
+                                    str(api_key),
+                                    source=f"self_registration:{spec.name}",
+                                )
+                                logger.info(
+                                    f"SkillLearner: self-registered on {spec.name}, "
+                                    f"saved {spec.env_var_name}"
+                                )
+                                return True
+                            else:
+                                logger.info(
+                                    f"Registration succeeded but no API key found. "
+                                    f"Looked for '{api_key_field}' in: {list(data.keys())}"
+                                )
+                                return False
+
+                        # Non-success — ask LLM to analyze and retry
+                        if attempt < max_attempts - 1:
+                            retry = await self._llm_analyze_failure(
+                                spec, reg_url, method, body, resp.status,
+                                resp_text, api_key_field, raw_spec,
                             )
-                            logger.info(
-                                f"SkillLearner: self-registered on {spec.name}, "
-                                f"saved {spec.env_var_name}"
-                            )
-                            return True
+                            if retry:
+                                reg_url = retry.get("url", reg_url)
+                                method = retry.get("method", method).upper()
+                                body = retry.get("body", body)
+                                headers = retry.get("headers", headers)
+                                api_key_field = retry.get("api_key_field", api_key_field)
+                                logger.info(
+                                    f"SkillLearner: LLM retry plan → "
+                                    f"{method} {reg_url} body_keys={list(body.keys())}"
+                                )
+                                continue
+                            else:
+                                logger.info("SkillLearner: LLM says no retry possible")
+                                return False
                         else:
                             logger.info(
-                                f"Registration succeeded but no API key found. "
-                                f"Looked for '{api_key_field}' in: {list(data.keys())}"
+                                f"Self-registration failed after {max_attempts} attempts"
                             )
-                    else:
-                        logger.info(f"Self-registration failed ({resp.status}): {resp_text[:300]}")
-        except Exception as e:
-            logger.warning(f"Self-registration request failed: {e}")
+            except Exception as e:
+                logger.warning(f"Self-registration request failed: {e}")
 
         return False
+
+    async def _llm_analyze_failure(
+        self, spec: ParsedSpec, url: str, method: str,
+        body: dict, status: int, response_text: str,
+        api_key_field: str, raw_spec: str,
+    ) -> Optional[dict]:
+        """Ask LLM to analyze a failed registration and produce a new plan.
+
+        Handles: 409 name taken (retry with variant), 400 missing fields,
+        422 validation errors, etc. Returns new request plan or None to stop.
+        """
+        bot_name = os.getenv("BOT_NAME", "Nova")
+        owner_name = os.getenv("OWNER_NAME", "User")
+
+        prompt = (
+            f"You are an AI agent named {bot_name}. You tried to register on an API but it failed.\n\n"
+            f"FAILED REQUEST:\n"
+            f"  {method} {url}\n"
+            f"  Body: {json.dumps(body)}\n\n"
+            f"ERROR RESPONSE:\n"
+            f"  Status: {status}\n"
+            f"  Body: {response_text[:1000]}\n\n"
+            f"API SPEC (for reference):\n{raw_spec[:4000]}\n\n"
+            f"Analyze the error and decide the BEST recovery strategy:\n"
+            f"1. If name/username is already taken → FIRST check the API spec for a "
+            f"login, key recovery, or key rotation endpoint that could retrieve the existing key. "
+            f"If found, return that request instead. If no recovery endpoint exists, "
+            f"retry registration with a variant name "
+            f"(e.g., '{bot_name}_agent', '{bot_name}_{owner_name}', '{bot_name}_bot')\n"
+            f"2. If a required field is missing → add it\n"
+            f"3. If the error is unrecoverable (auth required, service down) → give up\n\n"
+            f"Return ONLY valid JSON (no markdown fences).\n"
+            f"If you can retry or recover, return the NEW request:\n"
+            f'{{"retry": true, "url": "...", "method": "POST", '
+            f'"headers": {{"Content-Type": "application/json"}}, '
+            f'"body": {{...new body...}}, "api_key_field": "{api_key_field}"}}\n\n'
+            f"If unrecoverable, return: {{\"retry\": false, \"reason\": \"why\"}}"
+        )
+
+        try:
+            resp = await asyncio.wait_for(
+                self.llm.create_message(
+                    model="gemini/gemini-2.0-flash",
+                    messages=[{"role": "user", "content": prompt}],
+                    system="You are a precise API integration assistant. Output only valid JSON.",
+                    max_tokens=800,
+                ),
+                timeout=15.0,
+            )
+            text = ""
+            if hasattr(resp, 'content') and resp.content:
+                for block in resp.content:
+                    if hasattr(block, 'text'):
+                        text += block.text
+            text = text.strip().replace("```json", "").replace("```", "").strip()
+
+            result = json.loads(text)
+            if result.get("retry"):
+                return result
+            else:
+                logger.info(
+                    f"SkillLearner: LLM says no retry — {result.get('reason', 'unknown')}"
+                )
+                return None
+
+        except Exception as e:
+            logger.warning(f"SkillLearner: LLM failure analysis failed: {e}")
+            return None
 
     @staticmethod
     def _extract_api_key(data: dict, field_hint: str) -> Optional[str]:
