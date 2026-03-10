@@ -68,6 +68,16 @@ def _get(key: str, settings: dict, fallback):
     return fallback
 
 
+def get_bot_name() -> str:
+    """Get bot name from env > settings.json > default. Use instead of os.getenv('BOT_NAME')."""
+    return _get("BOT_NAME", load_settings(), "Nova")
+
+
+def get_owner_name() -> str:
+    """Get owner name from env > settings.json > default. Use instead of os.getenv('OWNER_NAME')."""
+    return _get("OWNER_NAME", load_settings(), "User")
+
+
 def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") -> AgentConfig:
     """Load configuration from environment, settings.json, and yaml files.
 

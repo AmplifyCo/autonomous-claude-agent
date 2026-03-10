@@ -1009,7 +1009,8 @@ sudo systemctl restart novabot</pre>
 
     def _get_login_html(self, error: str = "") -> str:
         """Render the login page."""
-        bot_name = os.getenv("BOT_NAME", "Nova")
+        from src.core.config import get_bot_name
+        bot_name = get_bot_name()
         error_html = (
             f'<div class="error-msg">{error}</div>' if error else ""
         )
@@ -1109,7 +1110,8 @@ sudo systemctl restart novabot</pre>
 
     def _get_dashboard_html(self) -> str:
         """Render Mission Control dashboard."""
-        bot_name = os.getenv("BOT_NAME", "Nova")
+        from src.core.config import get_bot_name
+        bot_name = get_bot_name()
         show_logout = "inline-block" if self._is_auth_required() else "none"
         return f"""<!DOCTYPE html>
 <html lang="en">

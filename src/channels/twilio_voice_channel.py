@@ -73,8 +73,8 @@ class TwilioVoiceChannel:
         originator: str = ""
     ):
         if not originator:
-            owner_name = os.getenv("OWNER_NAME", "User")
-            originator = f"{owner_name} (Principal)"
+            from src.core.config import get_owner_name
+            originator = f"{get_owner_name()} (Principal)"
         """Register a mission for an outbound call.
 
         When the gather webhook fires, the mission context is injected
@@ -167,8 +167,8 @@ class TwilioVoiceChannel:
 
         # Explicitly identify Principal to prevent LLM hallucination
         if clean_number in clean_allowed:
-            owner_name = os.getenv("OWNER_NAME", "User")
-            return f"{owner_name} (Principal)"
+            from src.core.config import get_owner_name
+            return f"{get_owner_name()} (Principal)"
 
         return clean_number
 
@@ -228,8 +228,8 @@ class TwilioVoiceChannel:
 
         logger.info(f"📞 {direction.title()} voice call with {user_number} (CallSid: {call_sid})")
 
-        bot_name = os.getenv("BOT_NAME", "Nova")
-        return await self._generate_twiml(text=f"Hi, I'm {bot_name} - a Non-Human Assistant. How can I help you?", prompt_for_input=True)
+        from src.core.config import get_bot_name
+        return await self._generate_twiml(text=f"Hi, I'm {get_bot_name()} - a Non-Human Assistant. How can I help you?", prompt_for_input=True)
 
     async def handle_gather(self, form_data: Dict[str, str]) -> str:
         """Handle speech recognition result webhook (/twilio/voice/gather).

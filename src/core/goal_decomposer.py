@@ -19,7 +19,8 @@ from .task_queue import Subtask
 
 logger = logging.getLogger(__name__)
 
-_BOT_NAME = os.getenv("BOT_NAME", "Nova")
+from .config import get_bot_name as _get_bot_name
+_BOT_NAME = _get_bot_name()
 
 # Note: uses .format() at runtime — {bot_name}, {tools}, {goal}, {task_id} are runtime variables
 _DECOMPOSE_PROMPT = """You are a task planner for an autonomous AI agent named {bot_name}.

@@ -849,8 +849,9 @@ class SkillLearner:
 
         Returns True if credential was obtained and saved.
         """
-        bot_name = os.getenv("BOT_NAME", "Nova")
-        owner_name = os.getenv("OWNER_NAME", "User")
+        from ..config import get_bot_name, get_owner_name
+        bot_name = get_bot_name()
+        owner_name = get_owner_name()
 
         # Ask LLM to analyze the spec and produce an executable registration plan
         prompt = (
@@ -1026,8 +1027,9 @@ class SkillLearner:
         Handles: 409 name taken (retry with variant), 400 missing fields,
         422 validation errors, etc. Returns new request plan or None to stop.
         """
-        bot_name = os.getenv("BOT_NAME", "Nova")
-        owner_name = os.getenv("OWNER_NAME", "User")
+        from ..config import get_bot_name, get_owner_name
+        bot_name = get_bot_name()
+        owner_name = get_owner_name()
 
         prompt = (
             f"You are an AI agent named {bot_name}. You tried to register on an API but it failed.\n\n"

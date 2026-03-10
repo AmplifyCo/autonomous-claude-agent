@@ -93,7 +93,8 @@ class TwilioWhatsAppChannel:
         clean_number = from_number.replace('whatsapp:', '')
         clean_allowed = [num.replace('whatsapp:', '') for num in self.allowed_numbers]
         if clean_number in clean_allowed:
-            owner_name = os.getenv("OWNER_NAME", "User")
+            from src.core.config import get_owner_name
+            owner_name = get_owner_name()
             user_id = f"{owner_name} (Principal)"
         else:
             user_id = clean_number

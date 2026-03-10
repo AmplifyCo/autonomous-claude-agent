@@ -160,8 +160,9 @@ class ERC8004Tool(BaseTool):
 
         # Build metadata JSON
         if not metadata_str:
-            bot_name = os.getenv("BOT_NAME", "Nova")
-            owner_name = os.getenv("OWNER_NAME", "User")
+            from src.core.config import get_bot_name, get_owner_name
+            bot_name = get_bot_name()
+            owner_name = get_owner_name()
             metadata_str = json.dumps({
                 "name": bot_name,
                 "type": "ai_agent",

@@ -244,8 +244,9 @@ class AgentFactory:
 
     def _build_subagent_prompt(self, task: str, context: str) -> str:
         """Build system prompt for sub-agent with Nova's identity context."""
-        bot_name = os.getenv("BOT_NAME", "Nova")
-        owner_name = os.getenv("OWNER_NAME", "User")
+        from ..config import get_bot_name, get_owner_name
+        bot_name = get_bot_name()
+        owner_name = get_owner_name()
 
         prompt = (
             f"IDENTITY: You are a worker sub-agent of {bot_name}, {owner_name}'s AI assistant.\n"

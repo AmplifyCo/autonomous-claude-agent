@@ -108,7 +108,8 @@ class DailyDigest:
         uptime = self._get_uptime()
 
         # ── Build report ──
-        bot_name = os.getenv("BOT_NAME", "Nova")
+        from src.core.config import get_bot_name
+        bot_name = get_bot_name()
         lines = [f"📊 **{bot_name} Daily Report** — {now.strftime('%b %d, %Y')}"]
         lines.append("")
 

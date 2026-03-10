@@ -99,15 +99,35 @@ class TaskRunner:
                 logger.debug(f"_llm_call_with_fallback: {model} failed: {e}")
         return None
 
+    PURGE_INTERVAL_CYCLES = 240  # purge every ~1 hour (240 * 15s)
+
     async def start(self):
         """Main background loop. Runs indefinitely."""
         self._running = True
+        self._cycle_count = 0
         logger.info("🚀 TaskRunner background loop started")
+
+        # On startup: reset stale tasks + purge old completed ones
+        try:
+            self.task_queue.reset_stale_running(hours=6)
+            self.task_queue.purge_old(days=3)
+        except Exception as e:
+            logger.warning(f"Startup task cleanup failed: {e}")
+
         while self._running:
             try:
                 await self._process_next_task()
             except Exception as e:
                 logger.error(f"TaskRunner loop error: {e}", exc_info=True)
+
+            self._cycle_count += 1
+            if self._cycle_count >= self.PURGE_INTERVAL_CYCLES:
+                self._cycle_count = 0
+                try:
+                    self.task_queue.purge_old(days=3)
+                except Exception as e:
+                    logger.warning(f"Periodic task purge failed: {e}")
+
             await asyncio.sleep(self.CHECK_INTERVAL)
 
     def stop(self):
@@ -569,8 +589,9 @@ class TaskRunner:
             recent = [r[:2000] + "..." if len(r) > 2000 else r for r in prior_results[-3:]]
             context = "\n\nPREVIOUS STEPS COMPLETED:\n" + "\n".join(recent) + "\n\n---\n"
 
-        bot_name = os.getenv("BOT_NAME", "Nova")
-        owner_name = os.getenv("OWNER_NAME", "User")
+        from .config import get_bot_name, get_owner_name
+        bot_name = get_bot_name()
+        owner_name = get_owner_name()
         signature = f"{bot_name} — {owner_name}'s Non-Human Assistant"
 
         prompt = (

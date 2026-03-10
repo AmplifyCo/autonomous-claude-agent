@@ -236,7 +236,21 @@ class TaskQueue:
             )
 
     def mark_done(self, task_id: str, result: str = ""):
-        """Mark task as completed with a result summary."""
+        """Mark task as completed with a result summary.
+
+        Also marks any remaining 'pending' subtasks as 'skipped' so the
+        dashboard never shows stale 'pending' subtasks on a completed task.
+        """
+        task = self.get_task(task_id)
+        if task and task.subtasks:
+            changed = False
+            for st in task.subtasks:
+                if st.status == "pending":
+                    st.status = "skipped"
+                    changed = True
+            if changed:
+                self._save_subtasks(task_id, task.subtasks)
+
         with self._conn() as conn:
             conn.execute(
                 """UPDATE tasks SET status='done', result=?, completed_at=?
@@ -246,7 +260,17 @@ class TaskQueue:
         logger.info(f"Task {task_id} marked done")
 
     def mark_failed(self, task_id: str, error: str = ""):
-        """Mark task as failed."""
+        """Mark task as failed. Remaining pending subtasks are marked skipped."""
+        task = self.get_task(task_id)
+        if task and task.subtasks:
+            changed = False
+            for st in task.subtasks:
+                if st.status in ("pending", "running"):
+                    st.status = "skipped"
+                    changed = True
+            if changed:
+                self._save_subtasks(task_id, task.subtasks)
+
         with self._conn() as conn:
             conn.execute(
                 """UPDATE tasks SET status='failed', error=?, completed_at=?
@@ -254,6 +278,34 @@ class TaskQueue:
                 (error, datetime.utcnow().isoformat(), task_id),
             )
         logger.warning(f"Task {task_id} marked failed: {error[:80]}")
+
+    def _save_subtasks(self, task_id: str, subtasks):
+        """Write subtasks list back to DB."""
+        subtasks_json = json.dumps([
+            {
+                "description": st.description,
+                "tool_hints": st.tool_hints,
+                "model_tier": st.model_tier,
+                "status": st.status,
+                "result": st.result,
+                "error": st.error,
+                "verification_criteria": st.verification_criteria,
+                "reversible": st.reversible,
+                "depends_on": st.depends_on,
+                "execution_mode": st.execution_mode,
+                "delegate_to": st.delegate_to,
+                "priority": st.priority,
+                "orchestration_strategy": st.orchestration_strategy,
+                "dispatch": st.dispatch,
+                "estimated_minutes": st.estimated_minutes,
+            }
+            for st in subtasks
+        ])
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE tasks SET subtasks_json=? WHERE id=?",
+                (subtasks_json, task_id),
+            )
 
     def cancel(self, task_id: str):
         """Cancel a pending or running task."""
@@ -325,6 +377,43 @@ class TaskQueue:
                 (f"-{completed_hours} hours",),
             ).fetchall()
             return [self._row_to_task(r) for r in rows]
+
+    # ── Maintenance ─────────────────────────────────────────────────────────
+
+    def purge_old(self, days: int = 3) -> int:
+        """Delete completed/failed tasks older than `days` days.
+
+        Returns number of rows deleted.
+        """
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """DELETE FROM tasks
+                   WHERE status IN ('done', 'failed')
+                     AND completed_at < datetime('now', ?)""",
+                (f"-{days} days",),
+            )
+            count = cursor.rowcount
+            if count:
+                logger.info(f"Purged {count} completed/failed tasks older than {days} days")
+            return count
+
+    def reset_stale_running(self, hours: int = 6) -> int:
+        """Reset tasks stuck in 'running'/'decomposing' for more than `hours` hours to 'failed'.
+
+        Prevents zombie tasks from surviving restarts and getting re-picked.
+        Returns number of rows affected.
+        """
+        with self._conn() as conn:
+            cursor = conn.execute(
+                """UPDATE tasks SET status='failed', error='Stale: timed out', completed_at=datetime('now')
+                   WHERE status IN ('running', 'decomposing')
+                     AND started_at < datetime('now', ?)""",
+                (f"-{hours} hours",),
+            )
+            count = cursor.rowcount
+            if count:
+                logger.info(f"Reset {count} stale running/decomposing tasks (>{hours}h old)")
+            return count
 
     # ── Internal ─────────────────────────────────────────────────────────────
 

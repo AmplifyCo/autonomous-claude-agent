@@ -337,7 +337,8 @@ Assistant ({model_used}): {assistant_response}"""
         shared across all deployments. Stored in CoreBrain so they persist,
         can evolve, and are version-controlled.
         """
-        bot_name = os.getenv("BOT_NAME", "Nova")
+        from ..config import get_bot_name
+        bot_name = get_bot_name()
         principles = {
             "interpret_intent": {
                 "name": "Interpret Intent",
@@ -504,7 +505,8 @@ Privacy: Executive-level discretion. Never reveal principal's schedule details, 
         """
         from pathlib import Path as _Path
 
-        bot_name = os.getenv("BOT_NAME", "Nova")
+        from ..config import get_bot_name
+        bot_name = get_bot_name()
 
         # Load from file if present; strip comment lines (lines starting with #)
         try:
