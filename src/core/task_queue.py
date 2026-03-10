@@ -35,6 +35,8 @@ class Subtask:
     delegate_to: str = ""                 # Agent name from known_agents.json (if execution_mode="delegate")
     priority: str = "q2"                  # Eisenhower quadrant: q1 (do), q2 (schedule), q3 (delegate), q4 (eliminate)
     orchestration_strategy: str = "auto"  # "auto" | "race" | "fan_out" — multi-agent strategy
+    dispatch: str = "green"               # Prosser dispatch: green (AI fully), yellow (AI 80%), red (human needed), gray (skip today)
+    estimated_minutes: int = 5            # Estimated execution time in minutes
 
 
 @dataclass
@@ -85,6 +87,8 @@ class Task:
                     "delegate_to": st.delegate_to,
                     "priority": st.priority,
                     "orchestration_strategy": st.orchestration_strategy,
+                    "dispatch": st.dispatch,
+                    "estimated_minutes": st.estimated_minutes,
                 }
                 for st in self.subtasks
             ],
@@ -184,6 +188,8 @@ class TaskQueue:
                 "delegate_to": st.delegate_to,
                 "priority": st.priority,
                 "orchestration_strategy": st.orchestration_strategy,
+                "dispatch": st.dispatch,
+                "estimated_minutes": st.estimated_minutes,
             }
             for st in subtasks
         ])
@@ -218,6 +224,8 @@ class TaskQueue:
                 "delegate_to": st.delegate_to,
                 "priority": st.priority,
                 "orchestration_strategy": st.orchestration_strategy,
+                "dispatch": st.dispatch,
+                "estimated_minutes": st.estimated_minutes,
             }
             for st in task.subtasks
         ])
@@ -337,6 +345,8 @@ class TaskQueue:
                 delegate_to=s.get("delegate_to", ""),
                 priority=s.get("priority", "q2"),
                 orchestration_strategy=s.get("orchestration_strategy", "auto"),
+                dispatch=s.get("dispatch", "green"),
+                estimated_minutes=s.get("estimated_minutes", 5),
             )
             for s in subtask_dicts
         ]

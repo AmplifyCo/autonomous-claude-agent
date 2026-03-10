@@ -29,13 +29,16 @@ from ..types import ToolResult
 logger = logging.getLogger(__name__)
 
 # ── LinkedIn Content Composition Guide ────────────────────────────────────────
-# Loaded from src/core/tools/linkedin_guide.md — edit the .md file to update.
-_GUIDE_PATH = Path(__file__).parent / "linkedin_guide.md"
+# User-editable copy in data/guides/linkedin.md (survives git pulls).
+# Falls back to source default if data/guides/ copy doesn't exist.
+_USER_GUIDE = Path("data/guides/linkedin.md")
+_SRC_GUIDE = Path(__file__).parent / "linkedin_guide.md"
+_guide_path = _USER_GUIDE if _USER_GUIDE.exists() else _SRC_GUIDE
 try:
-    _CONTENT_GUIDE = _GUIDE_PATH.read_text(encoding="utf-8").strip()
-    logger.debug("LinkedIn content guide loaded from %s", _GUIDE_PATH)
+    _CONTENT_GUIDE = _guide_path.read_text(encoding="utf-8").strip()
+    logger.debug("LinkedIn content guide loaded from %s", _guide_path)
 except FileNotFoundError:
-    logger.warning("LinkedIn content guide not found at %s — using empty", _GUIDE_PATH)
+    logger.warning("LinkedIn content guide not found — using empty")
     _CONTENT_GUIDE = ""
 
 # New Posts REST API (replaces legacy /v2/ugcPosts)

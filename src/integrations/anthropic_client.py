@@ -5,6 +5,8 @@ from typing import List, Dict, Any, Optional
 import asyncio
 import logging
 
+from ..utils import api_alert
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,9 +67,11 @@ class AnthropicClient:
 
         except anthropic.APIError as e:
             logger.error(f"Anthropic API error: {e}")
+            await api_alert.check_and_alert(e, "Anthropic")
             raise
         except Exception as e:
             logger.error(f"Unexpected error calling Claude API: {e}")
+            await api_alert.check_and_alert(e, "Anthropic")
             raise
 
     async def create_message_stream(

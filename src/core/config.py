@@ -1,14 +1,57 @@
 """Configuration loader for the autonomous agent."""
 
+import json
 import os
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 from .types import AgentConfig
 
+# Safe settings that can be edited from the dashboard (no secrets)
+SAFE_SETTINGS = {
+    "bot_name", "owner_name", "log_level",
+    "default_model", "subagent_model", "chat_model", "intent_model",
+    "max_iterations", "timeout_seconds", "auto_commit",
+    "self_build_mode", "dashboard_port", "user_timezone",
+}
+
+SETTINGS_FILE = Path("data/settings.json")
+
+
+def load_settings() -> dict:
+    """Load safe settings from data/settings.json."""
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return {}
+    return {}
+
+
+def save_settings(settings: dict) -> None:
+    """Save safe settings to data/settings.json (only whitelisted keys)."""
+    filtered = {k: v for k, v in settings.items() if k in SAFE_SETTINGS}
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_FILE, 'w') as f:
+        json.dump(filtered, f, indent=2)
+
+
+def _get(key: str, settings: dict, fallback):
+    """Get config value: env var > settings.json > fallback."""
+    env_val = os.getenv(key.upper())
+    if env_val is not None:
+        return env_val
+    settings_key = key.lower()
+    if settings_key in settings:
+        return settings[settings_key]
+    return fallback
+
 
 def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") -> AgentConfig:
-    """Load configuration from environment and yaml files.
+    """Load configuration from environment, settings.json, and yaml files.
+
+    Priority: .env > data/settings.json > config/agent.yaml > defaults
 
     Args:
         env_file: Path to .env file
@@ -19,6 +62,9 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
     """
     # Load environment variables
     load_dotenv(env_file)
+
+    # Load safe settings from dashboard-editable file
+    settings = load_settings()
 
     # Load YAML config if exists
     yaml_config = {}
@@ -36,10 +82,10 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
     config = AgentConfig(
         # API - Multi-tier model configuration
         api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        default_model=os.getenv("DEFAULT_MODEL", models_config.get("default", "gemini/gemini-2.0-flash")),
-        subagent_model=os.getenv("SUBAGENT_MODEL", models_config.get("subagent", "gemini/gemini-2.0-flash")),
-        chat_model=os.getenv("CHAT_MODEL", models_config.get("chat", "gemini/gemini-2.0-flash")),
-        intent_model=os.getenv("INTENT_MODEL", models_config.get("intent", "gemini/gemini-2.0-flash")),
+        default_model=_get("DEFAULT_MODEL", settings, models_config.get("default", "gemini/gemini-2.0-flash")),
+        subagent_model=_get("SUBAGENT_MODEL", settings, models_config.get("subagent", "gemini/gemini-2.0-flash")),
+        chat_model=_get("CHAT_MODEL", settings, models_config.get("chat", "gemini/gemini-2.0-flash")),
+        intent_model=_get("INTENT_MODEL", settings, models_config.get("intent", "gemini/gemini-2.0-flash")),
 
         # Gemini (optional — intent + simple chat via LiteLLM)
         gemini_model=os.getenv("GEMINI_MODEL", yaml_config.get("agent", {}).get("models", {}).get("gemini_flash", "gemini/gemini-2.0-flash")),
@@ -66,10 +112,10 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
         local_coder_endpoint=os.getenv("LOCAL_CODER_ENDPOINT", local_model_config.get("coder", {}).get("endpoint")),
 
         # Execution
-        max_iterations=int(os.getenv("MAX_ITERATIONS", yaml_config.get("agent", {}).get("execution", {}).get("max_iterations", 50))),
-        timeout_seconds=int(os.getenv("TIMEOUT_SECONDS", yaml_config.get("agent", {}).get("execution", {}).get("timeout_seconds", 300))),
+        max_iterations=int(_get("MAX_ITERATIONS", settings, yaml_config.get("agent", {}).get("execution", {}).get("max_iterations", 50))),
+        timeout_seconds=int(_get("TIMEOUT_SECONDS", settings, yaml_config.get("agent", {}).get("execution", {}).get("timeout_seconds", 300))),
         retry_attempts=int(os.getenv("RETRY_ATTEMPTS", yaml_config.get("agent", {}).get("execution", {}).get("retry_attempts", 3))),
-        self_build_mode=os.getenv("SELF_BUILD_MODE", "false").lower() == "true",
+        self_build_mode=str(_get("SELF_BUILD_MODE", settings, "false")).lower() == "true",
 
         # Brain
         vector_db_path=os.getenv("VECTOR_DB_PATH", "./data/lancedb"),
@@ -78,7 +124,7 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
         memory_path=os.getenv("MEMORY_PATH", "./data/memory"),
 
         # Git
-        auto_commit=os.getenv("AUTO_COMMIT", "true").lower() == "true",
+        auto_commit=str(_get("AUTO_COMMIT", settings, "true")).lower() == "true",
         git_user_name=os.getenv("GIT_USER_NAME", ""),
         git_user_email=os.getenv("GIT_USER_EMAIL", ""),
 
@@ -103,15 +149,15 @@ def load_config(env_file: str = ".env", config_file: str = "config/agent.yaml") 
         nova_api_key=os.getenv("NOVA_API_KEY"),
 
         # Identity
-        bot_name=os.getenv("BOT_NAME", "Nova"),
-        owner_name=os.getenv("OWNER_NAME", "User"),
+        bot_name=_get("BOT_NAME", settings, "Nova"),
+        owner_name=_get("OWNER_NAME", settings, "User"),
 
         dashboard_enabled=yaml_config.get("monitoring", {}).get("dashboard", {}).get("enabled", True),
         dashboard_host=os.getenv("DASHBOARD_HOST", yaml_config.get("monitoring", {}).get("dashboard", {}).get("host", "0.0.0.0")),
-        dashboard_port=int(os.getenv("DASHBOARD_PORT", yaml_config.get("monitoring", {}).get("dashboard", {}).get("port", 18789))),
+        dashboard_port=int(_get("DASHBOARD_PORT", settings, yaml_config.get("monitoring", {}).get("dashboard", {}).get("port", 18789))),
 
         # Logging
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
+        log_level=_get("LOG_LEVEL", settings, "INFO"),
         log_file=os.getenv("LOG_FILE", "./data/logs/agent.log"),
     )
 

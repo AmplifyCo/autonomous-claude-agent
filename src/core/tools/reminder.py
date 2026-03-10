@@ -1,7 +1,12 @@
-"""Reminder tool — set, list, and cancel reminders with persistent JSON storage."""
+"""Reminder tool — set, list, and cancel reminders with persistent JSON storage.
+
+Supports one-time and recurring reminders (daily, weekly, weekdays, custom interval).
+Recurring reminders auto-reschedule after firing via ReminderScheduler.
+"""
 
 import json
 import logging
+import random
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -30,7 +35,9 @@ class ReminderTool(BaseTool):
         "2. ACTIVE (execute action) — use when a task must be performed at a future time: "
         "'Post on LinkedIn at 9 AM', 'Send email tomorrow morning', 'Book restaurant on Mar 28'. "
         "Set action_goal to the full task description. When the reminder fires, Nova will execute "
-        "that goal using the right tools automatically — do NOT just set a passive reminder for these."
+        "that goal using the right tools automatically — do NOT just set a passive reminder for these.\n\n"
+        "Supports RECURRING reminders: set recurrence to 'daily', 'weekdays', 'weekly', or 'Nd' (every N days). "
+        "For random timing within a window (e.g. 'between 6-8 PM'), set random_window_minutes."
     )
     parameters = {
         "operation": {
@@ -53,6 +60,22 @@ class ReminderTool(BaseTool):
                 "Write the full goal as you would pass it to nova_task. "
                 "Example: 'Post the LinkedIn post from linkedin_post.txt using the linkedin tool'. "
                 "Leave empty for passive notify-only reminders."
+            )
+        },
+        "recurrence": {
+            "type": "string",
+            "description": (
+                "For recurring reminders. Options: 'daily' (every day), 'weekdays' (Mon-Fri), "
+                "'weekly' (same day each week), or 'Nd' for every N days (e.g. '3d' = every 3 days). "
+                "Leave empty for one-time reminders."
+            )
+        },
+        "random_window_minutes": {
+            "type": "integer",
+            "description": (
+                "If set, the reminder fires at a random time within this many minutes after remind_at. "
+                "E.g. remind_at='2025-03-05 18:00' + random_window_minutes=120 → fires randomly between 6-8 PM. "
+                "Default: 0 (fire at exact time)."
             )
         },
         "channel": {
@@ -93,6 +116,8 @@ class ReminderTool(BaseTool):
         message: Optional[str] = None,
         remind_at: Optional[str] = None,
         action_goal: Optional[str] = None,
+        recurrence: Optional[str] = None,
+        random_window_minutes: Optional[int] = None,
         channel: str = "telegram",
         reminder_id: Optional[str] = None,
         **kwargs
@@ -100,7 +125,8 @@ class ReminderTool(BaseTool):
         """Execute reminder operation."""
         try:
             if operation == "set_reminder":
-                return self._set_reminder(message, remind_at, action_goal, channel)
+                return self._set_reminder(message, remind_at, action_goal, channel,
+                                          recurrence, random_window_minutes)
             elif operation == "list_reminders":
                 return self._list_reminders()
             elif operation == "cancel_reminder":
@@ -111,14 +137,19 @@ class ReminderTool(BaseTool):
             logger.error(f"Reminder operation error: {e}", exc_info=True)
             return ToolResult(success=False, error=f"Reminder operation failed: {str(e)}")
 
+    # Valid recurrence values
+    _VALID_RECURRENCE = {"daily", "weekdays", "weekly"}
+
     def _set_reminder(
         self,
         message: Optional[str],
         remind_at: Optional[str],
         action_goal: Optional[str] = None,
         channel: str = "telegram",
+        recurrence: Optional[str] = None,
+        random_window_minutes: Optional[int] = None,
     ) -> ToolResult:
-        """Set a new reminder (passive notify or active action)."""
+        """Set a new reminder (passive notify or active action, one-time or recurring)."""
         if not message:
             return ToolResult(success=False, error="Reminder message is required")
         if not remind_at:
@@ -144,12 +175,37 @@ class ReminderTool(BaseTool):
                         error=f"Invalid time format: '{remind_at}'. Use 'YYYY-MM-DD HH:MM' or relative like '30m', '2h', '1d'"
                     )
 
-        # Reject past reminders
+        # For recurring reminders with past base time, advance to next occurrence
+        if remind_dt < now and recurrence:
+            remind_dt = self._advance_to_next(remind_dt, recurrence, now)
+
+        # Reject past reminders (non-recurring)
         if remind_dt < now:
             return ToolResult(
                 success=False,
                 error=f"Cannot set reminder in the past. It's currently {now.strftime('%Y-%m-%d %H:%M')}."
             )
+
+        # Apply random window offset for this first occurrence
+        actual_fire_dt = remind_dt
+        if random_window_minutes and random_window_minutes > 0:
+            offset = random.randint(0, random_window_minutes)
+            actual_fire_dt = remind_dt + timedelta(minutes=offset)
+
+        # Validate recurrence
+        recurrence_str = None
+        if recurrence and recurrence.strip():
+            rec = recurrence.strip().lower()
+            # Accept 'daily', 'weekdays', 'weekly', or 'Nd' (e.g. '3d')
+            if rec in self._VALID_RECURRENCE:
+                recurrence_str = rec
+            elif re.match(r'^\d+d$', rec):
+                recurrence_str = rec
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"Invalid recurrence: '{recurrence}'. Use 'daily', 'weekdays', 'weekly', or 'Nd' (e.g. '3d')."
+                )
 
         # Generate unique ID
         rid = uuid.uuid4().hex[:8]
@@ -157,28 +213,62 @@ class ReminderTool(BaseTool):
         reminder = {
             "id": rid,
             "message": message,
-            "remind_at": remind_dt.isoformat(),
+            "remind_at": actual_fire_dt.isoformat(),
+            "base_time": remind_dt.strftime("%H:%M"),  # preserve the base hour:minute for rescheduling
             "created_at": now.isoformat(),
             "status": "pending",
             "channel": channel or "telegram",
         }
         if action_goal and action_goal.strip():
             reminder["action_goal"] = action_goal.strip()
+        if recurrence_str:
+            reminder["recurrence"] = recurrence_str
+        if random_window_minutes and random_window_minutes > 0:
+            reminder["random_window_minutes"] = int(random_window_minutes)
 
         # Save
         reminders = self._load_reminders()
         reminders.append(reminder)
         self._save_reminders(reminders)
 
-        formatted_time = remind_dt.strftime("%Y-%m-%d %H:%M")
+        formatted_time = actual_fire_dt.strftime("%Y-%m-%d %H:%M")
         kind = "action" if reminder.get("action_goal") else "notification"
-        logger.info(f"Reminder set ({kind}): {rid} — '{message}' at {formatted_time}")
+        recur_label = f" (recurring: {recurrence_str})" if recurrence_str else ""
+        window_label = f" (±{random_window_minutes}min window)" if random_window_minutes else ""
+        logger.info(f"Reminder set ({kind}): {rid} — '{message}' at {formatted_time}{recur_label}")
 
         return ToolResult(
             success=True,
-            output=f"{'Action reminder' if reminder.get('action_goal') else 'Reminder'} set for {formatted_time}: {message} (ID: {rid})",
-            metadata={"reminder_id": rid, "remind_at": remind_dt.isoformat(), "has_action": bool(reminder.get("action_goal"))}
+            output=f"{'Action reminder' if reminder.get('action_goal') else 'Reminder'} set for {formatted_time}: {message}{recur_label}{window_label} (ID: {rid})",
+            metadata={"reminder_id": rid, "remind_at": actual_fire_dt.isoformat(),
+                       "has_action": bool(reminder.get("action_goal")),
+                       "recurrence": recurrence_str}
         )
+
+    @staticmethod
+    def _advance_to_next(base_dt: datetime, recurrence: str, now: datetime) -> datetime:
+        """Advance a past base_dt to the next future occurrence based on recurrence."""
+        rec = recurrence.lower()
+        dt = base_dt
+
+        if rec == "daily":
+            while dt < now:
+                dt += timedelta(days=1)
+        elif rec == "weekdays":
+            while dt < now or dt.weekday() >= 5:  # skip weekends
+                dt += timedelta(days=1)
+        elif rec == "weekly":
+            while dt < now:
+                dt += timedelta(weeks=1)
+        elif re.match(r'^\d+d$', rec):
+            days = int(rec[:-1])
+            while dt < now:
+                dt += timedelta(days=days)
+        else:
+            # Fallback: daily
+            while dt < now:
+                dt += timedelta(days=1)
+        return dt
 
     def _list_reminders(self) -> ToolResult:
         """List all pending reminders."""
@@ -201,7 +291,8 @@ class ReminderTool(BaseTool):
             except (ValueError, KeyError):
                 time_str = r.get("remind_at", "unknown")
             kind = " [ACTION]" if r.get("action_goal") else ""
-            lines.append(f"{i}. [{r['id']}]{kind} {time_str} — {r.get('message', 'No message')}")
+            recur = f" 🔄{r['recurrence']}" if r.get("recurrence") else ""
+            lines.append(f"{i}. [{r['id']}]{kind}{recur} {time_str} — {r.get('message', 'No message')}")
 
         return ToolResult(
             success=True,

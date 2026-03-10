@@ -20,18 +20,20 @@ class XTool(BaseTool):
 
     name = "x_tool"
     description = (
-        "Tool to interact with X (Twitter) — search, post, retweet, look up profiles, and read communities. "
+        "Tool to interact with X (Twitter) — search, read tweets, post, retweet, look up profiles, and read communities. "
+        "Use 'get_tweet' to read a specific tweet by ID or URL (e.g. https://x.com/user/status/123456). "
         "Use 'search_tweets' to find X posts/discussions on any topic (uses real X API, falls back to DuckDuckGo). "
+        "Use 'search_communities' to find X Communities by keyword (e.g. 'Build in Public', 'AI Agents'). Returns community IDs, names, descriptions, member counts. "
         "Use 'read_community' to read the latest posts from an X Community (e.g. 'Build in Public'). "
         "Use 'lookup_user' to get a specific X handle's profile: bio, follower count, tweet count. "
         "Use 'post_tweet' or 'post_to_community' to publish content. "
-        "Use when: researching X opinions, reading community discussions, checking profiles, or posting updates."
+        "Use when: reading specific tweets, researching X opinions, reading community discussions, checking profiles, or posting updates."
     )
     parameters = {
         "operation": {
             "type": "string",
-            "description": "Operation: 'search_tweets', 'lookup_user', 'read_community', 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', 'follow_user', or 'save_community'",
-            "enum": ["search_tweets", "lookup_user", "read_community", "post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user", "save_community"]
+            "description": "Operation: 'get_tweet', 'search_tweets', 'search_communities', 'lookup_user', 'read_community', 'post_tweet', 'delete_tweet', 'post_to_community', 'retweet', 'quote_tweet', 'follow_user', or 'save_community'",
+            "enum": ["get_tweet", "search_tweets", "search_communities", "lookup_user", "read_community", "post_tweet", "delete_tweet", "post_to_community", "retweet", "quote_tweet", "follow_user", "save_community"]
         },
         "content": {
             "type": "string",
@@ -39,7 +41,7 @@ class XTool(BaseTool):
         },
         "tweet_id": {
             "type": "string",
-            "description": "Tweet ID to delete (for delete_tweet)"
+            "description": "Tweet ID or full URL (for get_tweet, delete_tweet, retweet, quote_tweet). URLs like https://x.com/user/status/123 are auto-parsed."
         },
         "community_id": {
             "type": "string",
@@ -140,8 +142,12 @@ class XTool(BaseTool):
     ) -> ToolResult:
         """Execute X operation."""
         try:
-            if operation == "search_tweets":
+            if operation == "get_tweet":
+                return await self._get_tweet(tweet_id)
+            elif operation == "search_tweets":
                 return await self._search_tweets(query, max_results)
+            elif operation == "search_communities":
+                return await self._search_communities(query, max_results)
             elif operation == "lookup_user":
                 return await self._lookup_user(target_username)
             elif operation == "read_community":
@@ -177,6 +183,93 @@ class XTool(BaseTool):
                 success=False,
                 error=f"X operation failed: {str(e)}"
             )
+
+    def _extract_tweet_id(self, tweet_id_or_url: str) -> Optional[str]:
+        """Extract tweet ID from a URL or return as-is if already an ID."""
+        import re
+        s = tweet_id_or_url.strip()
+        # Already a numeric ID
+        if s.isdigit():
+            return s
+        # Extract from URL like https://x.com/user/status/123456 or twitter.com/...
+        m = re.search(r'(?:x\.com|twitter\.com)/\w+/status/(\d+)', s)
+        if m:
+            return m.group(1)
+        return None
+
+    async def _get_tweet(self, tweet_id: Optional[str]) -> ToolResult:
+        """Read a specific tweet by ID or URL.
+
+        Uses X API v2 /tweets/:id with expansions for author info and metrics.
+        """
+        import asyncio
+
+        if not tweet_id:
+            return ToolResult(success=False, error="tweet_id or tweet URL is required for get_tweet")
+
+        parsed_id = self._extract_tweet_id(tweet_id)
+        if not parsed_id:
+            return ToolResult(success=False, error=f"Could not extract tweet ID from: {tweet_id}")
+
+        def _fetch():
+            oauth = self._get_oauth1_session()
+            return oauth.get(
+                f"{self.api_base}/tweets/{parsed_id}",
+                params={
+                    "tweet.fields": "created_at,text,public_metrics,author_id,conversation_id,in_reply_to_user_id,referenced_tweets",
+                    "expansions": "author_id,referenced_tweets.id",
+                    "user.fields": "name,username,verified",
+                }
+            )
+
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, _fetch)
+
+        if resp.status_code != 200:
+            return self._handle_error(resp)
+
+        data = resp.json()
+        tweet = data.get("data", {})
+        if not tweet:
+            return ToolResult(success=False, error=f"Tweet {parsed_id} not found or deleted")
+
+        users = {u["id"]: u for u in data.get("includes", {}).get("users", [])}
+        author = users.get(tweet.get("author_id", ""), {})
+        handle = author.get("username", "unknown")
+        name = author.get("name", "")
+        metrics = tweet.get("public_metrics", {})
+
+        lines = [
+            f"@{handle} ({name})",
+            f"",
+            tweet.get("text", ""),
+            f"",
+            f"❤️ {metrics.get('like_count', 0):,}  🔁 {metrics.get('retweet_count', 0):,}  "
+            f"💬 {metrics.get('reply_count', 0):,}  👁️ {metrics.get('impression_count', 0):,}",
+            f"Posted: {tweet.get('created_at', '')[:10]}",
+            f"URL: https://x.com/{handle}/status/{parsed_id}",
+        ]
+
+        # Show if it's a reply or quote
+        refs = tweet.get("referenced_tweets", [])
+        for ref in refs:
+            ref_type = ref.get("type", "")
+            if ref_type == "replied_to":
+                lines.append(f"↩️ Reply to tweet {ref['id']}")
+            elif ref_type == "quoted":
+                lines.append(f"🔗 Quote of tweet {ref['id']}")
+
+        logger.info(f"Read tweet {parsed_id} by @{handle}")
+        return ToolResult(
+            success=True,
+            output="\n".join(lines),
+            metadata={
+                "tweet_id": parsed_id,
+                "author": handle,
+                "text": tweet.get("text", ""),
+                "metrics": metrics,
+            }
+        )
 
     async def _search_tweets(self, query: Optional[str], max_results: int = 10) -> ToolResult:
         """Search X for tweets/discussions on a topic.
@@ -282,6 +375,79 @@ class XTool(BaseTool):
             success=True,
             output=formatted.strip(),
             metadata={"results": results, "query": query, "count": len(results), "source": "duckduckgo"}
+        )
+
+    async def _search_communities(self, query: Optional[str], max_results: int = 10) -> ToolResult:
+        """Search for X Communities by keyword.
+
+        Uses GET /2/communities/search to find communities matching a query.
+        Results are cached so future post_to_community calls can resolve by name.
+        """
+        import asyncio
+
+        if not query:
+            return ToolResult(success=False, error="query is required for search_communities")
+
+        def _do_search():
+            oauth = self._get_oauth1_session()
+            n = min(max(max_results, 1), 100)
+            return oauth.get(
+                f"{self.api_base}/communities/search",
+                params={
+                    "query": query,
+                    "max_results": n,
+                    "community.fields": "name,description,member_count,created_at"
+                }
+            )
+
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(None, _do_search)
+
+        if resp.status_code != 200:
+            return self._handle_error(resp)
+
+        data = resp.json()
+        communities = data.get("data", [])
+
+        if not communities:
+            return ToolResult(
+                success=True,
+                output=f"No X Communities found for '{query}'.",
+                metadata={"query": query, "count": 0}
+            )
+
+        # Cache all found communities for future use
+        cache = self._load_community_cache()
+        formatted = f"X Communities matching '{query}':\n\n"
+        for i, c in enumerate(communities, 1):
+            cid = c.get("id", "")
+            cname = c.get("name", "Unknown")
+            desc = c.get("description", "(no description)")[:150]
+            members = c.get("member_count", "N/A")
+            created = c.get("created_at", "")[:10]
+
+            formatted += (
+                f"{i}. {cname}\n"
+                f"   ID: {cid}\n"
+                f"   {desc}\n"
+                f"   Members: {members:,}  Created: {created}\n\n"
+            )
+
+            # Auto-cache for future resolution
+            if cid:
+                cache[cname.lower().strip()] = cid
+
+        self._save_community_cache(cache)
+        logger.info(f"Found {len(communities)} communities for '{query}', cached IDs")
+
+        return ToolResult(
+            success=True,
+            output=formatted.strip(),
+            metadata={
+                "query": query,
+                "count": len(communities),
+                "communities": [{"id": c.get("id"), "name": c.get("name")} for c in communities]
+            }
         )
 
     async def _read_community(self, community_id: Optional[str], max_results: int = 20) -> ToolResult:

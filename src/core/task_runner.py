@@ -73,7 +73,31 @@ class TaskRunner:
         self.orchestrator = orchestrator
         self._running = False
         self._current_task_id: Optional[str] = None
+        self._FALLBACK_MODELS = ["gemini/gemini-2.0-flash", "claude-haiku-4-5-20251001"]
         Path("./data/tasks").mkdir(parents=True, exist_ok=True)
+
+    async def _llm_call_with_fallback(self, prompt: str, max_tokens: int = 256) -> Optional[str]:
+        """Try Gemini Flash, fall back to Claude Haiku if Gemini fails.
+
+        Returns extracted text or None if all models fail.
+        """
+        gemini = getattr(self.agent, "gemini_client", None) if self.agent else None
+        if not gemini or not getattr(gemini, "enabled", False):
+            return None
+
+        for model in self._FALLBACK_MODELS:
+            try:
+                response = await gemini.create_message(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                )
+                text = self._extract_text_from_response(response).strip()
+                if text:
+                    return text
+            except Exception as e:
+                logger.debug(f"_llm_call_with_fallback: {model} failed: {e}")
+        return None
 
     async def start(self):
         """Main background loop. Runs indefinitely."""
@@ -201,11 +225,13 @@ class TaskRunner:
                             re_delegated = True
                             logger.info(f"Task {task.id}: step {idx+1} recovered via re-delegation")
 
-                    all_results.append(f"Step {idx+1}: {result}")
+                    # Cap result stored in memory to prevent context overflow in subsequent steps
+                    capped_result = result[:3000] + "..." if len(result) > 3000 else result
+                    all_results.append(f"Step {idx+1}: {capped_result}")
                     failed = result.startswith("ERROR:")
                     if failed and idx < num_subtasks - 1:
-                        logger.warning(f"Step {idx+1} failed, continuing: {result}")
-                        self.task_queue.update_subtask(task.id, idx, "failed", error=result)
+                        logger.warning(f"Step {idx+1} failed, continuing: {result[:200]}")
+                        self.task_queue.update_subtask(task.id, idx, "failed", error=result[:500])
                     else:
                         self.task_queue.update_subtask(task.id, idx, "done", result=result[:500])
 
@@ -257,10 +283,11 @@ class TaskRunner:
                     total_tokens += wave_tokens
 
                     for i, (idx, subtask, result, re_delegated) in enumerate(wave_results):
-                        all_results.append(f"Step {idx+1}: {result}")
+                        capped_result = result[:3000] + "..." if len(result) > 3000 else result
+                        all_results.append(f"Step {idx+1}: {capped_result}")
                         failed = result.startswith("ERROR:")
                         if failed and idx < num_subtasks - 1:
-                            self.task_queue.update_subtask(task.id, idx, "failed", error=result)
+                            self.task_queue.update_subtask(task.id, idx, "failed", error=result[:500])
                         else:
                             self.task_queue.update_subtask(task.id, idx, "done", result=result[:500])
                         await self._record_subtask_episode(subtask, result, failed)
@@ -521,10 +548,14 @@ class TaskRunner:
         ]
 
     def _resolve_model(self, model_tier: str) -> str:
-        """Map model_tier to a LiteLLM model string for sub-agents."""
+        """Map model_tier to a LiteLLM model string for sub-agents.
+
+        Uses Claude models as primary — Gemini billing is unreliable.
+        All models route through LiteLLM regardless of provider.
+        """
         tier_map = {
-            "flash": "gemini/gemini-2.0-flash",
-            "haiku": "gemini/gemini-2.0-flash",
+            "flash": "claude-haiku-4-5-20251001",
+            "haiku": "claude-haiku-4-5-20251001",
             "sonnet": "claude-sonnet-4-20250514",
             "opus": "claude-opus-4-20250514",
         }
@@ -534,7 +565,8 @@ class TaskRunner:
         """Build the execution prompt for a subtask (used by both self-execute and Orchestrator)."""
         context = ""
         if prior_results:
-            recent = prior_results[-3:]
+            # Cap each prior result to prevent context overflow (214K+ token errors)
+            recent = [r[:2000] + "..." if len(r) > 2000 else r for r in prior_results[-3:]]
             context = "\n\nPREVIOUS STEPS COMPLETED:\n" + "\n".join(recent) + "\n\n---\n"
 
         bot_name = os.getenv("BOT_NAME", "Nova")
@@ -644,38 +676,19 @@ class TaskRunner:
         return "ERROR: Max retries exceeded"
 
     async def _generate_retry_hint(self, subtask_desc: str, error: str) -> str:
-        """Ask Gemini Flash what went wrong and what different approach to try.
+        """Ask LLM what went wrong and what different approach to try.
 
+        Tries Gemini Flash first, falls back to Claude Haiku.
         Returns a 1-2 sentence hint string, or a generic fallback on any error.
         """
-        # Try to use the agent's gemini client if available
-        gemini = getattr(self.agent, "gemini_client", None) if self.agent else None
-        if not gemini or not getattr(gemini, "enabled", False):
-            return "Try a different search query or use a different tool to accomplish this step."
-
         hint_prompt = (
             f"An AI agent failed a task step. In 1-2 sentences only, suggest what it should "
             f"try differently on the next attempt.\n\n"
             f"Step: {subtask_desc[:200]}\n"
             f"Error: {error[:200]}"
         )
-        try:
-            response = await gemini.create_message(
-                model="gemini/gemini-2.0-flash",
-                messages=[{"role": "user", "content": hint_prompt}],
-                max_tokens=128,
-            )
-            hint = ""
-            if hasattr(response, "content"):
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        hint += block.text
-            elif isinstance(response, str):
-                hint = response
-            return hint.strip() or "Try a different approach for this step."
-        except Exception as e:
-            logger.debug(f"_generate_retry_hint failed: {e}")
-            return "Try a different approach or use a different tool for this step."
+        result = await self._llm_call_with_fallback(hint_prompt, max_tokens=128)
+        return result or "Try a different approach or use a different tool for this step."
 
     # ── Notification ──────────────────────────────────────────────────────────
 
@@ -684,21 +697,36 @@ class TaskRunner:
         """Strip Markdown special chars so Telegram plain-text mode never chokes."""
         return text[:limit].replace("*", "").replace("_", "").replace("`", "").replace("[", "").replace("]", "")
 
+    # Dispatch symbols for plan display
+    _DISPATCH_ICONS = {"green": "🟢", "yellow": "🟡", "red": "🔴", "gray": "⚪"}
+
     async def _notify_plan(self, task: Task, subtasks: list):
-        """Send a compact numbered plan with reasoning transparency (3B)."""
+        """Send a compact numbered plan with dispatch classification and time estimate."""
         irreversible_count = sum(1 for st in subtasks if not st.reversible)
+        total_minutes = sum(getattr(st, "estimated_minutes", 5) for st in subtasks)
+        # Dispatch summary
+        dispatch_counts = {}
+        for st in subtasks:
+            d = getattr(st, "dispatch", "green")
+            dispatch_counts[d] = dispatch_counts.get(d, 0) + 1
+        dispatch_summary = " ".join(
+            f"{self._DISPATCH_ICONS.get(d, '⚪')}{c}" for d, c in sorted(dispatch_counts.items())
+        )
         # 3B: Show approach reasoning — tools and strategy
         tools_used = set(t for st in subtasks for t in (st.tool_hints or []))
-        approach = f"Approach: {len(subtasks)} steps"
+        approach = f"Approach: {len(subtasks)} steps (~{total_minutes} min)"
         if tools_used:
             approach += f" using {', '.join(sorted(tools_used))}"
         steps = " | ".join(
-            f"{i}. {'⚠️ ' if not st.reversible else ''}{self._safe(st.description, 40)}"
+            f"{i}. {self._DISPATCH_ICONS.get(getattr(st, 'dispatch', 'green'), '⚪')}{'⚠️ ' if not st.reversible else ''}{self._safe(st.description, 40)}"
             for i, st in enumerate(subtasks, 1)
         )
-        msg = f"📋 {approach}\n{steps}"
+        msg = f"📋 {approach} [{dispatch_summary}]\n{steps}"
         if irreversible_count:
             msg += f"\n⚠️ {irreversible_count} irreversible — reply 'stop task' to cancel."
+        red_count = dispatch_counts.get("red", 0)
+        if red_count:
+            msg += f"\n🔴 {red_count} step(s) need your input — I'll flag them when reached."
         await self._notify_channel(task, msg)
 
     async def _notify_step_start(self, task: Task, step: int, total: int, description: str):
@@ -898,10 +926,6 @@ class TaskRunner:
         attempts it once. Returns the result string, or None if re-delegation
         itself fails.
         """
-        gemini = getattr(self.agent, "gemini_client", None) if self.agent else None
-        if not gemini or not getattr(gemini, "enabled", False):
-            return None
-
         logger.info(f"Task {task.id}: attempting adaptive re-delegation for subtask {idx+1}")
 
         redelegate_prompt = (
@@ -914,12 +938,9 @@ class TaskRunner:
             f"Respond ONLY with a JSON object. No explanation."
         )
         try:
-            response = await gemini.create_message(
-                model="gemini/gemini-2.0-flash",
-                messages=[{"role": "user", "content": redelegate_prompt}],
-                max_tokens=256,
-            )
-            text = self._extract_text_from_response(response).strip()
+            text = await self._llm_call_with_fallback(redelegate_prompt, max_tokens=256)
+            if not text:
+                return None
             if text.startswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
@@ -956,10 +977,6 @@ class TaskRunner:
         if not wave_had_failure and len(completed_results) < 3:
             return None
 
-        gemini = getattr(self.agent, "gemini_client", None) if self.agent else None
-        if not gemini or not getattr(gemini, "enabled", False):
-            return None
-
         remaining_desc = "\n".join(
             f"  Step: {st.description[:100]}" for st in remaining_subtasks
         )
@@ -979,12 +996,9 @@ class TaskRunner:
         )
 
         try:
-            response = await gemini.create_message(
-                model="gemini/gemini-2.0-flash",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=512,
-            )
-            text = self._extract_text_from_response(response).strip()
+            text = await self._llm_call_with_fallback(prompt, max_tokens=512)
+            if not text:
+                return None
 
             if "KEEP_PLAN" in text:
                 logger.info(f"Task {task.id}: replan check — keeping original plan")

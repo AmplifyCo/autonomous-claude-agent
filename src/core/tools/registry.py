@@ -91,6 +91,9 @@ class ToolRegistry:
         # ── Skill Acquisition (Phase 4A) ─────────────────────────────────
         self._register_skill_tool()
 
+        # ── Autonomous Discovery (browse → discover → connect) ────────
+        self._register_discover_tool()
+
         # ── Plugin Tools (auto-discovered from plugins/ directory) ─────────
         # Drop a folder into plugins/ with tool.py + manifest.json → auto-loaded.
         # Zero hub edits needed for new tools.
@@ -571,6 +574,23 @@ class ToolRegistry:
             self._skill_tool.skill_learner = skill_learner
             logger.info("🎓 SkillTool connected to SkillLearner")
 
+    def _register_discover_tool(self):
+        """Register DiscoverTool for autonomous API discovery."""
+        try:
+            from .discover import DiscoverTool
+            self._discover_tool = DiscoverTool()
+            self.register(self._discover_tool)
+            logger.info("🔍 DiscoverTool registered")
+        except Exception as e:
+            logger.warning(f"Failed to register DiscoverTool: {e}")
+
+    def set_discover_deps(self, llm_client, skill_learner):
+        """Wire DiscoverTool with LLM client and SkillLearner."""
+        if hasattr(self, '_discover_tool') and self._discover_tool:
+            self._discover_tool.llm_client = llm_client
+            self._discover_tool.skill_learner = skill_learner
+            logger.info("🔍 DiscoverTool connected to LLM + SkillLearner")
+
     def get_plugin_metadata(self) -> dict:
         """Return metadata for all loaded plugins + MCP tools.
 
@@ -686,9 +706,11 @@ class ToolRegistry:
             tool.task_queue = task_queue
             logger.info("🎯 NovaTask tool connected to TaskQueue")
 
-    def set_memory_sources(self, brain=None, episodic_memory=None):
+    def set_memory_sources(self, brain=None, episodic_memory=None, llm_client=None):
         """Wire memory sources into MemoryQueryTool (called from main.py after init)."""
         if hasattr(self, '_memory_tool') and self._memory_tool:
             self._memory_tool.brain = brain
             self._memory_tool.episodic_memory = episodic_memory
+            if llm_client:
+                self._memory_tool._llm_client = llm_client
             logger.info("🧠 MemoryQuery tool connected to Brain + EpisodicMemory")

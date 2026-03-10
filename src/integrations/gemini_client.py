@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 
+from ..utils import api_alert
+
 logger = logging.getLogger(__name__)
 
 
@@ -401,6 +403,7 @@ class GeminiClient:
 
         except Exception as e:
             logger.error(f"Gemini API error: {e}")
+            await api_alert.check_and_alert(e, "Gemini")
             raise
 
     async def test_connection(self) -> bool:

@@ -257,6 +257,21 @@ class SkillLearner:
         if not ok:
             return False, msg
 
+        # Step 5b: Sandbox test (import, instantiate, verify interface)
+        ok, test_msg = self._test_plugin(parsed.name, self._plugins_dir / parsed.name, manifest)
+        if not ok:
+            self._store_metadata(SkillMetadata(
+                name=parsed.name, source_url=url,
+                learned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                spec_version=parsed.version,
+                plugin_dir=str(self._plugins_dir / parsed.name),
+                status="test_failed",
+                env_vars_needed=manifest.get("env_vars", []),
+                description=parsed.description,
+            ))
+            return False, f"Plugin failed sandbox test: {test_msg}"
+        logger.info(f"SkillLearner: plugin {parsed.name} passed sandbox test")
+
         # Step 6: Check env vars (credential store → os.getenv)
         env_vars = manifest.get("env_vars", [])
         missing_env = [
@@ -333,6 +348,208 @@ class SkillLearner:
                 f"Skill {parsed.name} saved but failed to activate.{reload_msg}"
             )
 
+    async def learn_from_content(
+        self, spec_content: str, source_url: str = "discovered",
+        user_instructions: str = "",
+    ) -> Tuple[bool, str]:
+        """Learn from raw spec content (no URL fetch needed).
+
+        Used by DiscoverTool when it synthesizes a spec from browsed docs.
+        Runs: parse → generate → validate → test → write → reload.
+
+        Args:
+            spec_content: Raw markdown/JSON API spec content
+            source_url: Where the spec was discovered (for metadata)
+            user_instructions: Optional user instructions
+
+        Returns:
+            (success, human-readable message)
+        """
+        if not self.llm or not getattr(self.llm, "enabled", False):
+            return False, "Skill learning requires an LLM. Not available right now."
+
+        if len(spec_content) < 100:
+            return False, "Spec content too short to be a valid API specification."
+
+        logger.info(f"SkillLearner: learning from content ({len(spec_content)} chars, source={source_url})")
+
+        # Step 1: Parse (skip fetch — we already have the content)
+        ok, parsed = await self._parse_spec(spec_content)
+        if not ok:
+            return False, f"Could not parse spec: {parsed}"
+        logger.info(f"SkillLearner: parsed spec → {parsed.name} ({len(parsed.operations)} operations)")
+
+        # Step 2: Generate tool.py + manifest.json
+        ok, generated = await self._generate_plugin(parsed)
+        if not ok:
+            return False, f"Code generation failed: {generated}"
+
+        tool_code = generated["tool_code"]
+        manifest = generated["manifest"]
+
+        # Step 3: Validate (AST safety)
+        ok, reason = self._validate_code(tool_code)
+        if not ok:
+            self._store_metadata(SkillMetadata(
+                name=parsed.name, source_url=source_url,
+                learned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                spec_version=parsed.version,
+                plugin_dir=str(self._plugins_dir / parsed.name),
+                status="validation_failed",
+                env_vars_needed=manifest.get("env_vars", []),
+                description=parsed.description,
+            ))
+            return False, f"Generated code failed safety check: {reason}"
+
+        # Step 4: Write plugin
+        ok, msg = self._write_plugin(parsed.name, tool_code, manifest)
+        if not ok:
+            return False, msg
+
+        # Step 5: Sandbox test (import, instantiate, verify interface)
+        ok, test_msg = self._test_plugin(parsed.name, self._plugins_dir / parsed.name, manifest)
+        if not ok:
+            self._store_metadata(SkillMetadata(
+                name=parsed.name, source_url=source_url,
+                learned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                spec_version=parsed.version,
+                plugin_dir=str(self._plugins_dir / parsed.name),
+                status="test_failed",
+                env_vars_needed=manifest.get("env_vars", []),
+                description=parsed.description,
+            ))
+            return False, f"Plugin failed sandbox test: {test_msg}"
+        logger.info(f"SkillLearner: plugin {parsed.name} passed sandbox test")
+
+        # Step 6: Check env vars
+        env_vars = manifest.get("env_vars", [])
+        missing_env = [
+            v for v in env_vars
+            if not (self.credential_store and self.credential_store.resolve(v))
+            and not os.getenv(v)
+        ]
+
+        # Try self-registration if credentials missing
+        if missing_env and self.credential_store and self.llm:
+            reg_result = await self._try_self_registration(
+                parsed, missing_env, spec_content, user_instructions=user_instructions
+            )
+            if reg_result:
+                missing_env = [
+                    v for v in env_vars
+                    if not self.credential_store.resolve(v) and not os.getenv(v)
+                ]
+
+        if missing_env:
+            status = "pending_env"
+            env_msg = (
+                "\n\nTo activate, set these environment variables:\n"
+                + "\n".join(f"  - {v}" for v in missing_env)
+            )
+        else:
+            status = "active"
+            env_msg = ""
+
+        # Step 7: Hot-reload if ready
+        reload_msg = ""
+        if status == "active" and self.plugin_loader:
+            try:
+                ok, reload_msg = self.plugin_loader.reload_plugin(
+                    parsed.name, self._get_registry()
+                )
+                if not ok:
+                    status = "reload_failed"
+                    reload_msg = f"\nReload failed: {reload_msg}"
+                else:
+                    logger.info(f"SkillLearner: plugin {parsed.name} hot-reloaded")
+            except Exception as e:
+                status = "reload_failed"
+                reload_msg = f"\nReload failed: {e}"
+
+        # Step 8: Store metadata
+        self._store_metadata(SkillMetadata(
+            name=parsed.name, source_url=source_url,
+            learned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            spec_version=parsed.version,
+            plugin_dir=str(self._plugins_dir / parsed.name),
+            status=status, env_vars_needed=env_vars,
+            description=parsed.description,
+        ))
+
+        if status == "active":
+            return True, (
+                f"Learned the {parsed.name} skill! ({parsed.description})\n\n"
+                f"It's already active — try asking me to use {parsed.name}."
+            )
+        elif status == "pending_env":
+            return True, (
+                f"Learned the {parsed.name} skill and saved the plugin. "
+                f"({parsed.description}){env_msg}"
+            )
+        else:
+            return False, f"Skill {parsed.name} saved but failed to activate.{reload_msg}"
+
+    def _test_plugin(
+        self, name: str, plugin_dir, manifest: dict
+    ) -> Tuple[bool, str]:
+        """Sandbox test: import, instantiate, verify BaseTool interface.
+
+        Runs BEFORE hot-reload to catch broken plugins early.
+        """
+        import importlib.util
+        from pathlib import Path
+
+        tool_path = Path(plugin_dir) / "tool.py"
+        if not tool_path.exists():
+            return False, f"tool.py not found in {plugin_dir}"
+
+        # 1. Dynamic import in isolated namespace
+        spec = importlib.util.spec_from_file_location(f"plugin_test_{name}", str(tool_path))
+        if not spec or not spec.loader:
+            return False, "Could not create module spec"
+
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            return False, f"Import failed: {e}"
+
+        # 2. Find the tool class
+        class_name = manifest.get("class_name", "")
+        tool_class = getattr(module, class_name, None)
+        if not tool_class:
+            # Try to find any class that looks like a tool
+            for attr_name in dir(module):
+                obj = getattr(module, attr_name)
+                if isinstance(obj, type) and attr_name.endswith("Tool") and attr_name != "BaseTool":
+                    tool_class = obj
+                    break
+            if not tool_class:
+                return False, f"Class {class_name} not found in generated code"
+
+        # 3. Instantiate with placeholder credentials
+        constructor_args = manifest.get("constructor_args", {})
+        kwargs = {k: os.getenv(v, "test_key_placeholder") for k, v in constructor_args.items()}
+        try:
+            instance = tool_class(**kwargs)
+        except Exception as e:
+            return False, f"Instantiation failed: {e}"
+
+        # 4. Verify BaseTool interface
+        for attr in ("name", "description", "execute"):
+            if not hasattr(instance, attr):
+                return False, f"Missing required attribute: {attr}"
+
+        # 5. Verify to_anthropic_tool() produces valid schema
+        try:
+            tool_def = instance.to_anthropic_tool()
+            if not isinstance(tool_def, dict) or "name" not in tool_def:
+                return False, "to_anthropic_tool() returned invalid structure"
+        except Exception as e:
+            return False, f"to_anthropic_tool() failed: {e}"
+
+        return True, "Plugin passed sandbox tests"
+
     def get_learned_skills(self) -> List[SkillMetadata]:
         """Return metadata for all learned skills."""
         return list(self._learned_skills.values())
@@ -348,8 +565,6 @@ class SkillLearner:
         parsed_url = urlparse(url)
         if parsed_url.scheme != "https":
             return False, "Only HTTPS URLs are supported for security"
-        if not parsed_url.path.endswith((".md", ".markdown", ".json")):
-            return False, "URL must point to a .md or .json file"
 
         try:
             async with aiohttp.ClientSession() as session:

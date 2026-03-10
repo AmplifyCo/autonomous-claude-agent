@@ -52,7 +52,9 @@ TOOL_RISK_MAP: Dict[str, Dict[str, RiskLevel]] = {
         "_default": RiskLevel.WRITE,
     },
     "x_tool": {
+        "get_tweet": RiskLevel.READ,
         "search_tweets": RiskLevel.READ,
+        "search_communities": RiskLevel.READ,
         "lookup_user": RiskLevel.READ,
         "read_community": RiskLevel.READ,
         "save_community": RiskLevel.WRITE,
@@ -91,11 +93,33 @@ TOOL_RISK_MAP: Dict[str, Dict[str, RiskLevel]] = {
     "clock": {
         "_default": RiskLevel.READ,
     },
+    "moltbook": {
+        "get_feed": RiskLevel.READ,
+        "get_post": RiskLevel.READ,
+        "get_submolt": RiskLevel.READ,
+        "get_comments": RiskLevel.READ,
+        "create_post": RiskLevel.IRREVERSIBLE,
+        "create_comment": RiskLevel.IRREVERSIBLE,
+        "delete_post": RiskLevel.IRREVERSIBLE,
+        "_default": RiskLevel.WRITE,
+    },
     "polymarket": {
         "_default": RiskLevel.READ,
     },
     "memory_query": {
+        "store_learning": RiskLevel.WRITE,
         "_default": RiskLevel.READ,
+    },
+    "learn_skill": {
+        "list": RiskLevel.READ,
+        "status": RiskLevel.READ,
+        "learn": RiskLevel.WRITE,
+        "_default": RiskLevel.WRITE,
+    },
+    "discover_and_connect": {
+        "browse_only": RiskLevel.READ,
+        "discover": RiskLevel.WRITE,
+        "_default": RiskLevel.WRITE,
     },
 }
 
@@ -236,7 +260,8 @@ class PolicyGate:
         if operation and operation in tool_risks:
             return tool_risks[operation]
 
-        return tool_risks.get("_default", RiskLevel.WRITE)
+        # Fail-safe: unknown tools default to IRREVERSIBLE (block in conversation)
+        return tool_risks.get("_default", RiskLevel.IRREVERSIBLE)
 
     @staticmethod
     def _safe_params(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:

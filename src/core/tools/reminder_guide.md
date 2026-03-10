@@ -13,9 +13,22 @@
 - The action_goal must contain the FULL task description so Nova can execute it autonomously
 - Include all relevant details: post content, recipient, subject line, etc.
 
+## Recurring Reminders
+- Set recurrence: 'daily', 'weekdays' (Mon-Fri), 'weekly', or 'Nd' (every N days)
+- "Every evening research and post" → ACTIVE + recurrence='daily'
+- "Every weekday at 9 AM" → recurrence='weekdays'
+- Recurring reminders auto-reschedule after firing — no manual re-creation needed
+- Cancel a recurring reminder to stop all future occurrences
+
+## Random Time Windows
+- Use random_window_minutes for "between X and Y" style timing
+- "Between 6-8 PM" → remind_at='18:00' + random_window_minutes=120
+- Each occurrence picks a new random offset within the window
+
 ## Choosing the Right Mode
-- If the principal says "remind me to..." → PASSIVE (they want a nudge)
-- If the principal says "do X at Y time" or "schedule posting at..." → ACTIVE (they want execution)
+- "remind me to..." → PASSIVE (they want a nudge)
+- "do X at Y time" or "schedule posting at..." → ACTIVE (they want execution)
+- "every day/evening/morning do X" → ACTIVE + recurrence
 - When in doubt, use PASSIVE — let the principal decide whether to act
 
 ## Time Parsing

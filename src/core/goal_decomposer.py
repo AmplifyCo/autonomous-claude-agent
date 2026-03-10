@@ -48,6 +48,14 @@ RULES:
     DELEGATE when: commodity research, specialized analysis we can't do better, parallelizable grunt work, no identity needed.
 11. If execution_mode is "delegate", set delegate_to with an agent name from Available Agents below.
     If no suitable agent exists, set execution_mode: "self" (we do it ourselves).
+12. DISPATCH CLASSIFICATION (Prosser framework) — classify each subtask:
+    - "green" — AI can complete fully without human involvement (searches, data gathering, file writes)
+    - "yellow" — AI does 80%, human reviews/finalizes (drafting emails, content, scheduling)
+    - "red" — needs human brain/judgment/presence (strategy, pricing, sensitive comms)
+    - "gray" — not actionable right now (defer with reason in description)
+    When uncertain, bias toward "yellow" (prep) over "green" (dispatch).
+13. DURATION ESTIMATE — set estimated_minutes: realistic time in minutes for this subtask (1-60).
+    Searches/fetches: 1-3 min. Synthesis/writing: 5-10 min. Complex research: 10-20 min.
 
 Available Agents: {agents}
 
@@ -58,10 +66,10 @@ Goal: {goal}
 Respond ONLY with a JSON array. No explanation, no markdown fences.
 Example format (step 0 first, then steps 1+2 run in parallel, step 3 waits for both):
 [
-  {{"description": "Search X for posts about OpenClaw", "tool_hints": ["x_tool"], "model_tier": "flash", "verification_criteria": "At least 3 relevant tweets returned", "reversible": true, "depends_on": [], "execution_mode": "self", "delegate_to": "", "priority": "q2"}},
-  {{"description": "Search web for 'OpenClaw reviews 2025'", "tool_hints": ["web_search"], "model_tier": "flash", "verification_criteria": "Search returns relevant results", "reversible": true, "depends_on": [0], "execution_mode": "delegate", "delegate_to": "research-bot", "priority": "q3"}},
-  {{"description": "Fetch the OpenClaw GitHub README", "tool_hints": ["web_fetch"], "model_tier": "flash", "verification_criteria": "Page content contains README text", "reversible": true, "depends_on": [0], "execution_mode": "delegate", "delegate_to": "research-bot", "priority": "q3"}},
-  {{"description": "Compile all findings into ./data/tasks/{task_id}.txt with summary", "tool_hints": ["file_operations"], "model_tier": "sonnet", "verification_criteria": "File exists at ./data/tasks/{task_id}.txt with content", "reversible": true, "depends_on": [1, 2], "execution_mode": "self", "delegate_to": "", "priority": "q2"}}
+  {{"description": "Search X for posts about OpenClaw", "tool_hints": ["x_tool"], "model_tier": "flash", "verification_criteria": "At least 3 relevant tweets returned", "reversible": true, "depends_on": [], "execution_mode": "self", "delegate_to": "", "priority": "q2", "dispatch": "green", "estimated_minutes": 2}},
+  {{"description": "Search web for 'OpenClaw reviews 2025'", "tool_hints": ["web_search"], "model_tier": "flash", "verification_criteria": "Search returns relevant results", "reversible": true, "depends_on": [0], "execution_mode": "delegate", "delegate_to": "research-bot", "priority": "q3", "dispatch": "green", "estimated_minutes": 2}},
+  {{"description": "Fetch the OpenClaw GitHub README", "tool_hints": ["web_fetch"], "model_tier": "flash", "verification_criteria": "Page content contains README text", "reversible": true, "depends_on": [0], "execution_mode": "delegate", "delegate_to": "research-bot", "priority": "q3", "dispatch": "green", "estimated_minutes": 1}},
+  {{"description": "Compile all findings into ./data/tasks/{task_id}.txt with summary", "tool_hints": ["file_operations"], "model_tier": "sonnet", "verification_criteria": "File exists at ./data/tasks/{task_id}.txt with content", "reversible": true, "depends_on": [1, 2], "execution_mode": "self", "delegate_to": "", "priority": "q2", "dispatch": "yellow", "estimated_minutes": 5}}
 ]"""
 
 # Fallback decomposition used when Gemini Flash is unavailable (built in _make_fallback)
@@ -85,7 +93,7 @@ class GoalDecomposer:
         self.gemini_client = gemini_client
         self.template_library = template_library
         self.agent_broker = agent_broker
-        self._model = "gemini/gemini-2.0-flash"
+        self._models = ["gemini/gemini-2.0-flash", "claude-haiku-4-5-20251001"]
 
     async def decompose(
         self,
@@ -150,32 +158,37 @@ class GoalDecomposer:
         if template_context:
             prompt = template_context + "\n" + prompt
 
-        try:
-            # Single call to Gemini Flash — no tools needed, just JSON output
-            response = await self.gemini_client.create_message(
-                model=self._model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1024,
-            )
+        # Try each model in the fallback chain before giving up
+        last_error = None
+        for model in self._models:
+            try:
+                response = await self.gemini_client.create_message(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,
+                )
 
-            # Extract text from response
-            text = self._extract_text(response)
-            if not text:
-                logger.warning("GoalDecomposer: empty response, using fallback")
-                return self._make_fallback(goal, task_id)
+                text = self._extract_text(response)
+                if not text:
+                    logger.warning(f"GoalDecomposer: empty response from {model}, trying next")
+                    continue
 
-            subtasks = self._parse_json(text, task_id)
-            if not subtasks:
-                return self._make_fallback(goal, task_id)
+                subtasks = self._parse_json(text, task_id)
+                if not subtasks:
+                    logger.warning(f"GoalDecomposer: unparseable response from {model}, trying next")
+                    continue
 
-            logger.info(f"GoalDecomposer: decomposed into {len(subtasks)} subtasks for goal: {goal[:60]}")
-            for i, st in enumerate(subtasks):
-                logger.debug(f"  Subtask {i+1}: {st.description[:80]} [{st.model_tier}]")
-            return subtasks
+                logger.info(f"GoalDecomposer: decomposed into {len(subtasks)} subtasks via {model} for: {goal[:60]}")
+                for i, st in enumerate(subtasks):
+                    logger.debug(f"  Subtask {i+1}: {st.description[:80]} [{st.model_tier}]")
+                return subtasks
 
-        except Exception as e:
-            logger.error(f"GoalDecomposer error: {e}", exc_info=True)
-            return self._make_fallback(goal, task_id)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"GoalDecomposer: {model} failed: {e}, trying next model")
+
+        logger.error(f"GoalDecomposer: all models failed (last: {last_error}), using fallback")
+        return self._make_fallback(goal, task_id)
 
     # Known registered tool names — tool_hints are validated against this set
     _VALID_TOOL_NAMES = {
@@ -233,6 +246,13 @@ class GoalDecomposer:
                 orch_strategy = item.get("orchestration_strategy", "auto")
                 if orch_strategy not in ("auto", "race", "fan_out"):
                     orch_strategy = "auto"
+                dispatch = item.get("dispatch", "green")
+                if dispatch not in ("green", "yellow", "red", "gray"):
+                    dispatch = "green"
+                est_minutes = item.get("estimated_minutes", 5)
+                if not isinstance(est_minutes, (int, float)) or est_minutes < 1:
+                    est_minutes = 5
+                est_minutes = min(int(est_minutes), 60)
 
                 subtasks.append(Subtask(
                     description=desc,
@@ -246,6 +266,8 @@ class GoalDecomposer:
                     delegate_to=delegate_to,
                     priority=priority,
                     orchestration_strategy=orch_strategy,
+                    dispatch=dispatch,
+                    estimated_minutes=est_minutes,
                 ))
 
             # Ensure synthesis step mentions the task_id file path

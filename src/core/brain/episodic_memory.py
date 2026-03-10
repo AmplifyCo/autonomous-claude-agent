@@ -29,24 +29,45 @@ class EpisodicMemory:
         )
         logger.info(f"EpisodicMemory initialized at {path}")
 
+    # Importance presets for different episode types
+    IMPORTANCE_LEVELS = {
+        "correction": 0.95,      # User corrections — highest priority
+        "preference": 0.85,      # User preferences learned
+        "learning": 0.80,        # Research insights stored
+        "content_approved": 0.75, # Approved content patterns
+        "content_rejected": 0.70, # Rejected content patterns
+        "strategy": 0.70,        # Proven strategies
+        "task_success": 0.50,    # Routine task completions
+        "task_failure": 0.60,    # Failures (slightly higher — learn from mistakes)
+        "routine": 0.30,         # Routine observations
+    }
+
     async def record(
         self,
         action: str,
         outcome: str,
-        success: bool,
+        success: bool = True,
         participants: Optional[List[str]] = None,
         tool_used: Optional[str] = None,
         context: Optional[str] = None,
+        importance: Optional[float] = None,
+        episode_type: Optional[str] = None,
+        deduplicate: bool = False,
     ):
         """Record an event-outcome pair.
 
         Args:
             action: What was attempted (e.g. "emailed John about meeting")
-            outcome: What happened (trimmed to 200 chars for safety)
+            outcome: What happened (trimmed to 500 chars for safety)
             success: Whether the action succeeded
             participants: People involved (names only — no raw contact data)
             tool_used: Which tool was used (e.g. "email", "x_post")
-            context: Brief context snippet (max 100 chars)
+            context: Brief context snippet (max 300 chars)
+            importance: Explicit importance score (0.0-1.0). If None, auto-assigned
+                        based on episode_type or success/failure.
+            episode_type: Type hint for auto-importance (e.g. "correction", "learning",
+                          "preference", "content_approved"). See IMPORTANCE_LEVELS.
+            deduplicate: If True, merge with similar existing episode instead of duplicating.
         """
         ts = datetime.now().isoformat()
         who = ", ".join(participants) if participants else "nobody specific"
@@ -54,6 +75,15 @@ class EpisodicMemory:
         # Trim to avoid storing raw sensitive content
         outcome_safe = outcome.strip()[:500]
         context_safe = (context or "").strip()[:300]
+
+        # Auto-assign importance if not explicit
+        if importance is None:
+            if episode_type and episode_type in self.IMPORTANCE_LEVELS:
+                importance = self.IMPORTANCE_LEVELS[episode_type]
+            elif not success:
+                importance = self.IMPORTANCE_LEVELS["task_failure"]
+            else:
+                importance = self.IMPORTANCE_LEVELS["task_success"]
 
         text = (
             f"Episode [{ts[:10]}]: {action}\n"
@@ -66,23 +96,25 @@ class EpisodicMemory:
         await self.db.store(
             text=text,
             metadata={
-                "type": "episode",
+                "type": episode_type or "episode",
                 "action": action[:100],
                 "success": success,
                 "tool_used": tool_used or "unknown",
                 "participants": who,
                 "timestamp": ts,
                 "date": ts[:10],
-            }
+                "importance": importance,
+            },
+            deduplicate=deduplicate,
         )
-        logger.debug(f"Recorded episode: {action[:50]} → {'ok' if success else 'fail'}")
+        logger.debug(f"Recorded episode: {action[:50]} → {'ok' if success else 'fail'} (importance={importance:.2f})")
 
     async def recall(self, query: str, n: int = 3, days_back: int = 60) -> str:
-        """Retrieve relevant past episodes for context injection.
+        """Retrieve relevant past episodes using composite scoring.
 
-        Fetches 2x candidates then re-ranks by combining semantic relevance
-        with recency and success — so yesterday's successful Moltbook registration
-        outranks last week's failed attempt even if both are semantically similar.
+        Uses VectorDatabase's composite scoring to rank by similarity + recency +
+        importance in a single pass. Higher-importance memories (corrections,
+        learnings) surface above routine episodes even if slightly less similar.
 
         Args:
             query: Current task / topic to search for relevant episodes
@@ -94,14 +126,16 @@ class EpisodicMemory:
         """
         results = await self.db.search(
             query=query,
-            n_results=n * 2,  # Fetch extra candidates for re-ranking
-            filter_metadata={"type": "episode"}
+            n_results=n,
+            composite_scoring=True,
+            scoring_weights={"similarity": 0.5, "recency": 0.3, "importance": 0.2},
+            recency_half_life_days=14.0,
         )
 
         if not results:
             return ""
 
-        # Filter by date (LanceDB returns metadata but doesn't filter on date natively)
+        # Filter by date
         cutoff = (datetime.now() - timedelta(days=days_back)).date().isoformat()
         recent = [
             r for r in results
@@ -111,35 +145,8 @@ class EpisodicMemory:
         if not recent:
             return ""
 
-        # Re-rank: recency + success boost
-        now = datetime.now()
-        scored = []
-        for r in recent:
-            # Semantic score (invert L2 distance)
-            dist = r.get("distance", 1.0)
-            semantic = max(0.0, 1.0 - dist / 1.5)
-
-            # Recency score: linear decay over 5 days (120h)
-            ts_str = r.get("metadata", {}).get("timestamp", "")
-            recency = 0.0
-            if ts_str:
-                try:
-                    age_h = (now - datetime.fromisoformat(ts_str)).total_seconds() / 3600.0
-                    recency = max(0.0, 1.0 - age_h / 120.0)
-                except (ValueError, TypeError):
-                    pass
-
-            # Success bonus: successful episodes are more useful than failures
-            success_bonus = 0.1 if r.get("metadata", {}).get("success", False) else 0.0
-
-            combined = 0.6 * semantic + 0.3 * recency + 0.1 + success_bonus
-            scored.append((combined, r))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = [r for _, r in scored[:n]]
-
         lines = ["RELEVANT PAST EPISODES:"]
-        for r in top:
+        for r in recent:
             lines.append(f"  {r['text'].strip()}")
 
         return "\n".join(lines)
@@ -255,6 +262,128 @@ class EpisodicMemory:
             for tool, v in counts.items()
             if v["total"] >= 3
         }
+
+
+    async def extract_and_store_facts(
+        self,
+        text: str,
+        llm_client,
+        source: str = "unknown",
+        model: str = "gemini/gemini-2.0-flash",
+    ) -> int:
+        """Extract atomic facts from text and store each as a separate memory.
+
+        Instead of storing one large blob, breaks it into granular facts that
+        can be independently retrieved. Uses LLM to extract facts.
+
+        Args:
+            text: Large text to decompose (article, research, conversation)
+            llm_client: LLM client (GeminiClient or AnthropicClient) with create_message()
+            source: Where this text came from (e.g. "tweet", "article", "research")
+            model: Model to use for extraction
+
+        Returns:
+            Number of facts extracted and stored
+        """
+        if len(text) < 50:
+            # Too short to extract — store as-is
+            await self.record(
+                action=f"Fact from {source}",
+                outcome=text,
+                episode_type="learning",
+                deduplicate=True,
+            )
+            return 1
+
+        prompt = (
+            "Extract distinct, atomic facts from the following text. "
+            "Each fact should be a single, self-contained statement that can be "
+            "understood without the rest of the text.\n\n"
+            "Rules:\n"
+            "- One fact per line\n"
+            "- No numbering or bullets\n"
+            "- Each fact must be independently meaningful\n"
+            "- Skip filler, opinions, and marketing language\n"
+            "- Keep technical details and specific claims\n"
+            "- Maximum 15 facts\n\n"
+            f"TEXT:\n{text[:3000]}\n\n"
+            "FACTS (one per line):"
+        )
+
+        try:
+            response = await llm_client.create_message(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                system="You extract atomic facts from text. Output only facts, one per line.",
+                max_tokens=1024,
+            )
+
+            # Extract text from response
+            facts_text = ""
+            if hasattr(response, "content"):
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        facts_text += block.text
+            elif isinstance(response, str):
+                facts_text = response
+
+            facts = [f.strip() for f in facts_text.strip().split("\n") if f.strip() and len(f.strip()) > 10]
+
+            if not facts:
+                logger.warning("extract_and_store_facts: LLM returned no facts")
+                return 0
+
+            stored = 0
+            ts = datetime.now().isoformat()
+            for fact in facts[:15]:
+                await self.record(
+                    action=f"Fact from {source}: {fact[:80]}",
+                    outcome=fact,
+                    episode_type="learning",
+                    importance=0.75,
+                    deduplicate=True,
+                )
+                stored += 1
+
+            logger.info(f"Extracted {stored} atomic facts from {source}")
+            return stored
+
+        except Exception as e:
+            logger.warning(f"extract_and_store_facts failed: {e}")
+            # Fall back to storing the whole text
+            await self.record(
+                action=f"Learning from {source}",
+                outcome=text[:500],
+                episode_type="learning",
+                deduplicate=True,
+            )
+            return 1
+
+    async def forget_old(
+        self,
+        max_age_days: int = 90,
+        min_importance: float = 0.3,
+        dry_run: bool = False,
+    ) -> int:
+        """Intentional forgetting — remove old, low-importance episodes.
+
+        Delegates to VectorDatabase.forget(). Only removes memories that are
+        BOTH old AND unimportant. Corrections, learnings, and strategies are
+        protected by their high importance scores.
+
+        Args:
+            max_age_days: Only forget memories older than this
+            min_importance: Only forget memories with importance below this
+            dry_run: If True, count but don't delete
+
+        Returns:
+            Number of memories forgotten
+        """
+        return await self.db.forget(
+            max_age_days=max_age_days,
+            min_importance=min_importance,
+            dry_run=dry_run,
+        )
 
 
 def confidence_label(score: float) -> str:

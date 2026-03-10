@@ -157,6 +157,7 @@ Memory context (recent activity, reminders, conversations):
 Generate a useful morning briefing with up to {MAX_ITEMS} bullet points:
 • What's on today's agenda — any reminders, events, or follow-ups due today
 • Anything time-sensitive in the next 48 hours worth flagging
+• Any pending tasks that need the owner's input (red dispatch items)
 • One pending item or task the owner should not forget
 
 Be concise, warm, and practically useful. Focus on what's actionable today.

@@ -27,7 +27,8 @@ class SubAgent:
         api_client: AnthropicClient,
         model: str,
         tools: ToolRegistry,
-        system_prompt: str
+        system_prompt: str,
+        gemini_client=None,
     ):
         """Initialize sub-agent.
 
@@ -37,9 +38,11 @@ class SubAgent:
             model: Model to use
             tools: Tool registry
             system_prompt: System prompt
+            gemini_client: Optional GeminiClient for Gemini models
         """
         self.task = task
         self.api_client = api_client
+        self.gemini_client = gemini_client
         self.model = model
         self.tools = tools
         self.system_prompt = system_prompt
@@ -66,14 +69,42 @@ class SubAgent:
             while iteration < max_iterations:
                 iteration += 1
 
-                # Call API
-                response = await self.api_client.create_message(
-                    model=self.model,
-                    messages=messages,
-                    tools=self.tools.get_tool_definitions(),
-                    system=self.system_prompt,
-                    max_tokens=4096
+                # Route to correct client based on model prefix
+                is_gemini = self.model.startswith("gemini/")
+                if is_gemini and not self.gemini_client:
+                    # Gemini client unavailable — fall back to Claude Sonnet
+                    logger.warning(
+                        f"SubAgent: model={self.model} but gemini_client is None — "
+                        f"falling back to Claude Sonnet"
+                    )
+                    self.model = "claude-sonnet-4-20250514"
+                    is_gemini = False
+                client = (
+                    self.gemini_client
+                    if is_gemini and self.gemini_client
+                    else self.api_client
                 )
+                # Retry with backoff for rate limits (429)
+                for attempt in range(3):
+                    try:
+                        response = await client.create_message(
+                            model=self.model,
+                            messages=messages,
+                            tools=self.tools.get_tool_definitions(),
+                            system=self.system_prompt,
+                            max_tokens=4096
+                        )
+                        break  # success
+                    except Exception as api_err:
+                        if "429" in str(api_err) or "rate_limit" in str(api_err):
+                            wait = (attempt + 1) * 15  # 15s, 30s, 45s
+                            logger.warning(f"SubAgent rate limited, waiting {wait}s (attempt {attempt+1}/3)")
+                            import asyncio as _asyncio
+                            await _asyncio.sleep(wait)
+                            if attempt == 2:
+                                raise  # exhausted retries
+                        else:
+                            raise
 
                 # Check stop reason
                 if response.stop_reason == "end_turn":
@@ -157,18 +188,20 @@ class SubAgent:
 class AgentFactory:
     """Factory for creating sub-agent instances via Claude API."""
 
-    def __init__(self, api_client: AnthropicClient, config: AgentConfig):
+    def __init__(self, api_client: AnthropicClient, config: AgentConfig, gemini_client=None):
         """Initialize agent factory.
 
         Args:
             api_client: Anthropic API client
             config: Agent configuration
+            gemini_client: Optional GeminiClient for Gemini model routing
         """
         self.api_client = api_client
+        self.gemini_client = gemini_client
         self.config = config
         self.tools = ToolRegistry()
 
-        logger.info("Initialized AgentFactory")
+        logger.info(f"Initialized AgentFactory (gemini={'yes' if gemini_client else 'no'})")
 
     def set_tools(self, tools: ToolRegistry):
         """Share parent agent's tool registry with sub-agents.
@@ -205,7 +238,8 @@ class AgentFactory:
             api_client=self.api_client,
             model=model,
             tools=self.tools,
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
+            gemini_client=self.gemini_client,
         )
 
     def _build_subagent_prompt(self, task: str, context: str) -> str:

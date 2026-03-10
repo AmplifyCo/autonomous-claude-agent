@@ -1,8 +1,14 @@
-"""Reminder scheduler — background asyncio loop that fires due reminders via Telegram."""
+"""Reminder scheduler — background asyncio loop that fires due reminders via Telegram.
+
+Supports recurring reminders: after firing, auto-reschedules based on recurrence
+(daily, weekdays, weekly, Nd). Random window offsets applied on each reschedule.
+"""
 
 import asyncio
 import json
 import logging
+import random
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -113,12 +119,61 @@ class ReminderScheduler:
                     logger.error(f"Failed to fire reminder {rid}: {e}")
                     continue  # Don't mark as fired if it failed
 
-                reminder["status"] = "fired"
-                reminder["fired_at"] = now.isoformat()
+                # Handle recurring vs one-time
+                if reminder.get("recurrence"):
+                    self._reschedule_recurring(reminder, now)
+                    logger.info(f"Recurring reminder {rid} rescheduled: next at {reminder['remind_at']}")
+                else:
+                    reminder["status"] = "fired"
+                    reminder["fired_at"] = now.isoformat()
                 fired_any = True
 
         if fired_any:
             self._save_reminders(reminders)
+
+    def _reschedule_recurring(self, reminder: Dict[str, Any], now: datetime):
+        """Reschedule a recurring reminder for its next occurrence.
+
+        Uses base_time (HH:MM) to maintain consistent scheduling,
+        then applies random_window_minutes offset if configured.
+        """
+        recurrence = reminder.get("recurrence", "daily")
+        base_time_str = reminder.get("base_time", "09:00")
+
+        try:
+            base_hour, base_minute = map(int, base_time_str.split(":"))
+        except (ValueError, AttributeError):
+            base_hour, base_minute = 9, 0
+
+        # Calculate next base date
+        next_date = now.date() + timedelta(days=1)  # start from tomorrow
+
+        if recurrence == "daily":
+            pass  # tomorrow is fine
+        elif recurrence == "weekdays":
+            while next_date.weekday() >= 5:  # skip Sat/Sun
+                next_date += timedelta(days=1)
+        elif recurrence == "weekly":
+            next_date += timedelta(days=6)  # 7 days from now (tomorrow + 6)
+        elif re.match(r'^\d+d$', recurrence):
+            days = int(recurrence[:-1])
+            next_date = now.date() + timedelta(days=days)
+        # else: default to daily (tomorrow)
+
+        next_dt = datetime(
+            next_date.year, next_date.month, next_date.day,
+            base_hour, base_minute, tzinfo=USER_TZ
+        )
+
+        # Apply random window offset
+        window = reminder.get("random_window_minutes", 0)
+        if window and window > 0:
+            offset = random.randint(0, window)
+            next_dt += timedelta(minutes=offset)
+
+        reminder["remind_at"] = next_dt.isoformat()
+        reminder["last_fired"] = now.isoformat()
+        # status stays "pending" so it fires again
 
     def _cleanup_old(self):
         """Remove fired/cancelled reminders older than CLEANUP_AFTER_DAYS."""
@@ -131,7 +186,7 @@ class ReminderScheduler:
 
         reminders = [
             r for r in reminders
-            if r.get("status") == "pending" or self._is_recent(r, cutoff)
+            if r.get("status") == "pending" or r.get("recurrence") or self._is_recent(r, cutoff)
         ]
 
         removed = original_count - len(reminders)

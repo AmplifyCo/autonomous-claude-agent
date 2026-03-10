@@ -96,9 +96,12 @@ These drives are defined in `brain/nova_purpose.py` and executed by `brain/atten
 | 💬 **WhatsApp** | Send and receive messages via Twilio WhatsApp |
 | ⏰ **Reminders** | Set time-based reminders; Nova notifies you when they fire |
 | ⚡ **Background Tasks** | Autonomous multi-step research or actions with dependency-aware parallel execution; full Telegram notification on completion |
+| 🔍 **Autonomous Discovery** | Point Nova at any URL — it browses, discovers APIs, evaluates safety, generates a plugin, sandbox-tests it, and connects automatically |
+| 🎓 **Skill Learning** | Learns new API integrations from spec files; auto-registers, obtains credentials, and hot-reloads plugins without restart |
 | 📄 **File Operations** | Read, write, and manage files on the host |
 | 💻 **Shell Commands** | Execute sandboxed bash commands |
 | 🧠 **Memory** | Learns your preferences, style, contacts, and conversation history |
+| 📊 **Mission Control** | Real-time dashboard with tasks, wallet balances, system health, tool performance, and live chat |
 
 ---
 
@@ -139,7 +142,7 @@ graph TD
         T1[web_search · web_fetch · browser]
         T2[email · calendar · reminder · contacts]
         T3[x_tool · linkedin · whatsapp · twilio_call]
-        T4[nova_task · bash · file · learn_skill]
+        T4[nova_task · bash · file · learn_skill · discover_and_connect]
     end
 
     subgraph Background["⏰ BACKGROUND SERVICES"]
@@ -214,6 +217,9 @@ Third-party content (emails from others) is **summarised before storage**, never
 | 📚 **Reasoning Templates** | `brain/reasoning_template_library.py` | Stores successful goal→subtask decompositions in LanceDB; GoalDecomposer queries before each new task to reuse proven patterns |
 | ✅ **Pending Action Confirmation** | `brain/working_memory.py` + `conversation_manager.py` | Stores proposed actions ("shall I post this?") and executes on user confirmation ("yes") — fixes the re-draft loop |
 | 📊 **Intent Collector** | `brain/intent_data_collector.py` | Captures live intent labels as training data for future model fine-tuning |
+| 🔍 **Capability Discovery** | `tools/discover.py` | Autonomous 5-step pipeline: browse → discover API → LLM review (safety + usefulness) → connect → report. Works on any URL. |
+| 🎓 **Skill Learner** | `brain/skill_learner.py` | Generates BaseTool plugins from API specs; AST safety validation + sandbox testing before hot-reload; LLM-driven self-registration |
+| 🧪 **Plugin Sandbox** | `brain/skill_learner.py` | Dynamic import, instantiation, and interface verification of generated plugins before they go live |
 
 ---
 
@@ -622,6 +628,32 @@ rm ~/Library/LaunchAgents/com.nova.digitalclone.plist
 </details>
 
 <details>
+<summary><b>"Check out example-api.com"</b> — autonomous capability discovery</summary>
+
+```
+1. Telegram → Heart
+   Intent: action | confidence: high | tools: discover_and_connect | background: no
+
+2. Heart → Agent (flash tier — discovery tool)
+
+3. Agent → discover_and_connect(operation="discover", url="example-api.com")
+   → Step 1 (BROWSE): aiohttp fetches page content
+   → Step 2 (DISCOVER): Gemini Flash analyzes page → finds /docs/api, openapi.json
+   → Step 3 (REVIEW): Gemini Flash evaluates → risk: low, capabilities: [list items, create items]
+   → Step 4 (CONNECT): fetches spec → SkillLearner generates plugin
+     → AST safety validation ✓
+     → Sandbox test (import, instantiate, verify interface) ✓
+     → Self-registration → API key obtained
+     → Plugin hot-reloaded into registry
+
+4. Agent → "Connected to Example API! You can now ask me to list or create items."
+
+5. Future messages mentioning "example" → intent classifier suggests the new tool
+```
+
+</details>
+
+<details>
 <summary><b>"Draft a tweet about our product launch" → "yes"</b> — pending action confirmation</summary>
 
 ```
@@ -678,6 +710,7 @@ novabot/
 │   │   │   ├── intent_data_collector.py   # Training data capture (JSONL)
 │   │   │   ├── critic_agent.py            # Validates task output; triggers LLM refinement
 │   │   │   ├── reasoning_template_library.py  # Stores + reuses successful decompositions
+│   │   │   ├── skill_learner.py           # API spec → plugin generation with sandbox testing
 │   │   │   └── vector_db.py               # LanceDB wrapper (shared by all brain components)
 │   │   ├── tools/
 │   │   │   ├── search.py                  # Tavily + DuckDuckGo web search
@@ -694,6 +727,8 @@ novabot/
 │   │   │   ├── bash.py                    # Sandboxed shell commands
 │   │   │   ├── file.py                    # File read/write operations
 │   │   │   ├── clock.py                   # Current time
+│   │   │   ├── discover.py                # Autonomous API discovery (browse → connect)
+│   │   │   ├── skill_tool.py              # Learn new skills from API specs
 │   │   │   └── registry.py                # Tool registration + just-in-time scoping
 │   │   ├── nervous_system/
 │   │   │   ├── execution_governor.py      # Central coordinator
@@ -727,9 +762,10 @@ novabot/
 │   │   ├── local_model_client.py          # SmolLM2 / Ollama offline fallback
 │   │   └── model_router.py                # Model tier selection
 │   ├── utils/
-│   │   ├── dashboard.py                   # Auth-gated web UI: chat window + live stats
+│   │   ├── dashboard.py                   # Mission Control: tasks, wallet, health, tools, chat, logs
 │   │   ├── daily_digest.py                # Scheduled daily activity summary via Telegram
 │   │   ├── memory_backup.py               # Periodic LanceDB snapshot to disk
+│   │   ├── api_alert.py                   # API subscription/billing alerts to Telegram
 │   │   ├── telegram_notifier.py           # Standalone Telegram notification helper
 │   │   ├── auto_updater.py                # Self-update from git on restart
 │   │   └── vulnerability_scanner.py       # Periodic dependency CVE scanning

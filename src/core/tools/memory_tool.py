@@ -24,30 +24,39 @@ class MemoryQueryTool(BaseTool):
     """Search Nova's memory during task execution."""
 
     name = "memory_query"
+    _llm_client = None  # Injected for atomic extraction (GeminiClient or AnthropicClient)
     description = (
-        "Search Nova's memory for relevant information. Use this to recall:\n"
+        "Search or store in Nova's memory. Use this to recall or learn:\n"
         "• 'episodes' — past events and outcomes ('what happened when I emailed John?')\n"
         "• 'context' — the principal's preferences, contacts, conversation history\n"
         "• 'style' — how the principal writes (for matching voice in content)\n"
         "• 'failures' — what went wrong with a specific tool before\n"
-        "Always use this before composing content (to check style) or contacting someone (to check history)."
+        "• 'store_learning' — save a new insight or learning for future recall\n"
+        "Always use this before composing content (to check style) or contacting someone (to check history).\n"
+        "Use 'store_learning' to save insights from research so Nova remembers them for future tasks."
     )
 
     parameters = {
         "operation": {
             "type": "string",
             "description": (
-                "What to search: 'episodes' (past events), 'context' (preferences/contacts), "
-                "'style' (writing voice), 'failures' (tool error history)"
+                "What to do: 'episodes' (recall events), 'context' (recall preferences), "
+                "'style' (recall writing voice), 'failures' (recall errors), "
+                "'store_learning' (save a new insight)"
             ),
-            "enum": ["episodes", "context", "style", "failures"],
+            "enum": ["episodes", "context", "style", "failures", "store_learning"],
         },
         "query": {
             "type": "string",
             "description": (
-                "What to search for. Examples: 'LinkedIn posts', 'emails to John', "
-                "'web_search', 'communication preferences'"
+                "For recall: what to search for. For store_learning: the insight/learning to save. "
+                "Examples: 'LinkedIn posts', 'emails to John', 'web_search', "
+                "'AI agents are trending toward long-term memory architectures'"
             ),
+        },
+        "category": {
+            "type": "string",
+            "description": "Category for store_learning (e.g. 'ai_agents', 'technology', 'industry_trends'). Optional.",
         },
     }
 
@@ -59,9 +68,10 @@ class MemoryQueryTool(BaseTool):
         self,
         operation: str,
         query: str = "",
+        category: str = "",
         **kwargs,
     ) -> ToolResult:
-        """Execute a memory query."""
+        """Execute a memory query or store a learning."""
         if not query:
             return ToolResult(success=False, error="Query is required")
 
@@ -74,6 +84,8 @@ class MemoryQueryTool(BaseTool):
                 return await self._recall_style(query)
             elif operation == "failures":
                 return await self._recall_failures(query)
+            elif operation == "store_learning":
+                return await self._store_learning(query, category)
             else:
                 return ToolResult(success=False, error=f"Unknown operation: {operation}")
         except Exception as e:
@@ -141,3 +153,48 @@ class MemoryQueryTool(BaseTool):
         for f in failures:
             lines.append(f"  • {f}")
         return ToolResult(success=True, output="\n".join(lines))
+
+    async def _store_learning(self, insight: str, category: str = "") -> ToolResult:
+        """Store a learning/insight in episodic memory for future recall.
+
+        For longer insights (>200 chars), uses atomic extraction to break into
+        granular facts. Each fact is independently retrievable.
+        """
+        if not self.episodic_memory:
+            return ToolResult(success=False, error="No episodic memory available.")
+
+        if len(insight) < 10:
+            return ToolResult(success=False, error="Insight too short — provide a meaningful learning.")
+
+        cat_label = f" [{category}]" if category else ""
+
+        # For longer insights, extract atomic facts if LLM is available
+        if len(insight) > 200 and self._llm_client:
+            try:
+                count = await self.episodic_memory.extract_and_store_facts(
+                    text=insight,
+                    llm_client=self._llm_client,
+                    source=category or "research",
+                )
+                logger.info(f"Stored {count} atomic facts{cat_label}: {insight[:80]}...")
+                return ToolResult(
+                    success=True,
+                    output=f"Learning saved{cat_label} as {count} atomic facts. Each will be independently recalled in future tasks.",
+                )
+            except Exception as e:
+                logger.debug(f"Atomic extraction failed, falling back to single store: {e}")
+
+        # Short insight or no LLM — store as single episode
+        await self.episodic_memory.record(
+            action=f"Learned{cat_label}: {insight[:100]}",
+            outcome=insight,
+            context=f"category: {category}" if category else "research_learning",
+            episode_type="learning",
+            deduplicate=True,
+        )
+
+        logger.info(f"Stored learning{cat_label}: {insight[:80]}...")
+        return ToolResult(
+            success=True,
+            output=f"Learning saved{cat_label}. This insight will be recalled in future related tasks.",
+        )

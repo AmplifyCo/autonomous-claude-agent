@@ -45,6 +45,8 @@ class AttentionEngine:
         purpose: Optional[NovaPurpose] = None,
         pattern_detector=None,
         contact_intelligence=None,
+        episodic_memory=None,
+        task_queue=None,
     ):
         self.brain = digital_brain
         self.llm = llm_client
@@ -53,8 +55,12 @@ class AttentionEngine:
         self.purpose = purpose or NovaPurpose()
         self.pattern_detector = pattern_detector          # 2A: behavioral patterns
         self.contact_intelligence = contact_intelligence  # 2D: contact tracking
+        self.episodic_memory = episodic_memory            # For periodic memory cleanup
+        self.task_queue = task_queue                      # For morning sweep triage
         self._log_path = Path("data/attention_log.json")
         self._is_running = False
+        self._last_forget_date = None                     # Run forget at most once/day
+        self._last_sweep_date = None                      # Morning sweep at most once/day
 
     # ── Background loop ───────────────────────────────────────────────
 
@@ -111,6 +117,104 @@ class AttentionEngine:
         for o in new_obs:
             self._mark_sent(o)
 
+        # Morning sweep — once per day during morning mode, triage pending tasks
+        if mode == PurposeMode.MORNING:
+            await self._morning_sweep()
+
+        # Periodic memory cleanup — once per day, forget old low-importance memories
+        await self._periodic_forget()
+
+    async def _periodic_forget(self):
+        """Run intentional forgetting at most once per day."""
+        if not self.episodic_memory:
+            return
+
+        today = tz_now().date().isoformat()
+        if self._last_forget_date == today:
+            return
+
+        try:
+            forgotten = await self.episodic_memory.forget_old(
+                max_age_days=90,
+                min_importance=0.3,
+            )
+            self._last_forget_date = today
+            if forgotten > 0:
+                logger.info(f"Memory cleanup: forgot {forgotten} old low-importance episodes")
+        except Exception as e:
+            logger.debug(f"Memory cleanup failed: {e}")
+
+    async def _morning_sweep(self):
+        """Morning sweep — triage pending/active tasks and send a structured brief.
+
+        Inspired by Jim Prosser's 'chief of staff' system: classify tasks by
+        dispatch level (green/yellow/red/gray) and present an action-ready brief.
+        Runs at most once per day during morning mode.
+        """
+        today = tz_now().date().isoformat()
+        if self._last_sweep_date == today:
+            return
+        if not self.task_queue:
+            self._last_sweep_date = today
+            return
+
+        try:
+            # Pull active + recently completed tasks
+            tasks = self.task_queue.get_active_and_recent_tasks(completed_hours=12)
+            if not tasks:
+                self._last_sweep_date = today
+                return
+
+            # Build sweep brief
+            lines = [f"📊 **Morning Sweep** — {self.owner_name}'s task triage"]
+            dispatch_icons = {"green": "🟢", "yellow": "🟡", "red": "🔴", "gray": "⚪"}
+
+            active = [t for t in tasks if t.status in ("pending", "decomposing", "running")]
+            completed = [t for t in tasks if t.status == "done"]
+            failed = [t for t in tasks if t.status == "failed"]
+
+            if active:
+                lines.append(f"\n⏳ **Active ({len(active)}):**")
+                for t in active[:5]:
+                    # Summarize dispatch breakdown of subtasks
+                    dispatch_counts = {}
+                    total_mins = 0
+                    for st in t.subtasks:
+                        d = getattr(st, "dispatch", "green")
+                        dispatch_counts[d] = dispatch_counts.get(d, 0) + 1
+                        total_mins += getattr(st, "estimated_minutes", 5)
+                    dispatch_str = " ".join(
+                        f"{dispatch_icons.get(d, '⚪')}{c}" for d, c in sorted(dispatch_counts.items())
+                    )
+                    progress = sum(1 for st in t.subtasks if st.status == "done")
+                    total = len(t.subtasks)
+                    time_est = f"~{total_mins}min" if total_mins else ""
+                    lines.append(
+                        f"  • {t.goal[:60]} [{progress}/{total}] {dispatch_str} {time_est}"
+                    )
+
+            if completed:
+                lines.append(f"\n✅ **Done overnight ({len(completed)}):**")
+                for t in completed[:3]:
+                    lines.append(f"  • {t.goal[:60]}")
+
+            if failed:
+                lines.append(f"\n❌ **Needs attention ({len(failed)}):**")
+                for t in failed[:3]:
+                    err = (t.error or "unknown")[:40]
+                    lines.append(f"  • {t.goal[:50]} — {err}")
+
+            # Only send if there's meaningful content
+            if len(lines) > 1:
+                await self.telegram.notify("\n".join(lines), level="info")
+                logger.info(f"Morning sweep sent: {len(active)} active, {len(completed)} done, {len(failed)} failed")
+
+            self._last_sweep_date = today
+
+        except Exception as e:
+            logger.debug(f"Morning sweep failed: {e}")
+            self._last_sweep_date = today
+
     async def _gather_memory_snippets(self) -> str:
         """Pull relevant memory context for attention analysis."""
         parts = []
@@ -158,34 +262,41 @@ class AttentionEngine:
 
         return "\n\n".join(parts) if parts else ""
 
+    _ATTENTION_MODELS = ["gemini/gemini-2.0-flash", "claude-haiku-4-5-20251001"]
+
     async def _generate_observations_from_prompt(self, prompt: str) -> list:
-        """Use LLM with the given purpose-built prompt to generate observations."""
+        """Use LLM with the given purpose-built prompt to generate observations.
+
+        Tries Gemini Flash first, falls back to Claude Haiku.
+        """
         if not self.llm:
             return []
 
-        try:
-            resp = await self.llm.create_message(
-                model="gemini/gemini-2.0-flash",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=256,
-            )
-            text = resp.content[0].text.strip()
-            # Strip markdown fences if present
-            text = text.replace("```json", "").replace("```", "").strip()
-            result = json.loads(text)
-            if not isinstance(result, list):
-                return []
-            # Sanitize each observation before returning
-            prompt_names = self._extract_prompt_names(prompt)
-            sanitized = []
-            for obs in result:
-                if not isinstance(obs, str) or not obs.strip():
+        for model in self._ATTENTION_MODELS:
+            try:
+                resp = await self.llm.create_message(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=256,
+                )
+                text = resp.content[0].text.strip()
+                # Strip markdown fences if present
+                text = text.replace("```json", "").replace("```", "").strip()
+                result = json.loads(text)
+                if not isinstance(result, list):
                     continue
-                sanitized.append(self._sanitize_observation(obs, prompt_names))
-            return sanitized
-        except Exception as e:
-            logger.debug(f"Attention LLM failed: {e}")
-            return []
+                # Sanitize each observation before returning
+                prompt_names = self._extract_prompt_names(prompt)
+                sanitized = []
+                for obs in result:
+                    if not isinstance(obs, str) or not obs.strip():
+                        continue
+                    sanitized.append(self._sanitize_observation(obs, prompt_names))
+                return sanitized
+            except Exception as e:
+                logger.debug(f"Attention LLM ({model}) failed: {e}")
+
+        return []
 
     @staticmethod
     def _extract_prompt_names(prompt: str) -> set:

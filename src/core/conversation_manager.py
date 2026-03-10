@@ -961,18 +961,49 @@ class ConversationManager:
 
     @classmethod
     def _load_tool_guides(cls) -> dict:
-        """Load tool usage guidelines from .md files next to each tool.
+        """Load tool usage guidelines from data/guides/ (user-editable).
 
-        Core tools: src/core/tools/{name}_guide.md
-        Plugins:    src/core/tools/plugins/{name}/guide.md
+        On first run, seeds data/guides/ from source defaults:
+          Core tools: src/core/tools/{name}_guide.md  → data/guides/{name}.md
+          Plugins:    src/core/tools/plugins/{name}/guide.md → data/guides/{name}.md
+
+        User edits in data/guides/ survive git pulls (data/ is gitignored).
         """
         guides = {}
+        user_guides_dir = Path("data/guides")
+        user_guides_dir.mkdir(parents=True, exist_ok=True)
         tools_dir = Path(__file__).parent / "tools"
 
-        # Core tool guides: {name}_guide.md
+        # Seed defaults: copy source guides to data/guides/ if not already present
+        # Core tool guides: {name}_guide.md → {name}.md
         for md_file in sorted(tools_dir.glob("*_guide.md")):
-            # e.g. "email_guide.md" → key "email"
             name = md_file.stem.replace("_guide", "")
+            target = user_guides_dir / f"{name}.md"
+            if not target.exists():
+                try:
+                    import shutil
+                    shutil.copy2(md_file, target)
+                    logger.info(f"Seeded default guide: {name}.md")
+                except Exception as e:
+                    logger.warning(f"Failed to seed guide {name}: {e}")
+
+        # Plugin guides: plugins/{name}/guide.md → {name}.md
+        plugins_dir = tools_dir / "plugins"
+        if plugins_dir.exists():
+            for guide_file in sorted(plugins_dir.glob("*/guide.md")):
+                name = guide_file.parent.name
+                target = user_guides_dir / f"{name}.md"
+                if not target.exists():
+                    try:
+                        import shutil
+                        shutil.copy2(guide_file, target)
+                        logger.info(f"Seeded default plugin guide: {name}.md")
+                    except Exception as e:
+                        logger.warning(f"Failed to seed plugin guide {name}: {e}")
+
+        # Load all guides from data/guides/
+        for md_file in sorted(user_guides_dir.glob("*.md")):
+            name = md_file.stem
             try:
                 content = md_file.read_text(encoding="utf-8").strip()
                 if content:
@@ -981,21 +1012,8 @@ class ConversationManager:
             except Exception as e:
                 logger.error(f"Failed to load tool guide {name}: {e}")
 
-        # Plugin guides: plugins/{name}/guide.md
-        plugins_dir = tools_dir / "plugins"
-        if plugins_dir.exists():
-            for guide_file in sorted(plugins_dir.glob("*/guide.md")):
-                name = guide_file.parent.name  # folder name = plugin name
-                try:
-                    content = guide_file.read_text(encoding="utf-8").strip()
-                    if content:
-                        guides[name] = content
-                        logger.debug(f"Loaded plugin guide: {name} ({len(content)} chars)")
-                except Exception as e:
-                    logger.error(f"Failed to load plugin guide {name}: {e}")
-
         if guides:
-            logger.info(f"Loaded {len(guides)} tool guide(s)")
+            logger.info(f"Loaded {len(guides)} tool guide(s) from data/guides/")
         return guides
 
     def _extract_contact_from_message(self, message: str) -> Optional[str]:
@@ -1284,6 +1302,7 @@ class ConversationManager:
                         success=False,
                         context=f"Original response was: {_last_resp[:100]}",
                         tool_used="correction",
+                        episode_type="correction",
                     )
                     logger.info(f"LLM-detected correction: {message[:60]}")
                     if self.working_memory:
@@ -1386,7 +1405,7 @@ class ConversationManager:
             # NOTE: nova_task is always available so the agent can queue
             # irreversible actions that the policy gate blocks in conversation.
             tool_hints = intent.get("tool_hints", [])
-            _SAFE_READONLY_TOOLS = {"file_operations", "web_search", "web_fetch", "clock", "reminder", "nova_task", "memory_query"}
+            _SAFE_READONLY_TOOLS = {"file_operations", "web_search", "web_fetch", "browser", "clock", "reminder", "nova_task", "memory_query"}
             # Extend with plugin tools marked safe_readonly in their manifest
             for pname, pmeta in self.agent.tools.get_plugin_metadata().items():
                 if pmeta.get("safe_readonly"):
@@ -2251,6 +2270,7 @@ KEY RULES:
 - "status" = ONLY for checking THIS SYSTEM's health/uptime (e.g., "system status", "are you running?", "uptime"). If the message mentions a specific platform/service name (moltbook, polymarket, linkedin, email, calendar, etc.), classify as "action" with that tool — NOT "status".
 - For action intents, list specific tools needed. Multiple allowed. "none" only when no tool applies.
 - For short/vague requests, expand inferred_task to be executable.
+- CRITICAL: Do NOT infer posting/sending intent from casual observations, opinions, or commentary. The user must EXPLICITLY ask to post, send, tweet, or share. Statements like "most agents are dumb" or "AI is changing everything" are CONVERSATION, not requests to post. Only classify as action with a social/messaging tool when the user says words like "post", "tweet", "share", "send", "publish", "write a post about".
 
 Examples:
 "Post on X: AI is the future" → action|high|Post exact text: AI is the future|x_tool|no|quality|content_writer|no|no
@@ -2260,6 +2280,8 @@ Examples:
 "Research quantum computing" → action|high|Research quantum computing and summarize|web_search|yes|sonnet|researcher|no|no
 "Schedule a call with Sarah at 2pm" → action|high|Create calendar event: call with Sarah 2pm|calendar|no|flash|scheduler|no|no
 "Remind me to call John at 3pm" → action|high|Set reminder: call John at 3pm|reminder|no|flash|scheduler|no|no
+"Every evening between 6-8 PM research and post on X" → action|high|Set recurring action reminder: daily research and post on X between 6-8 PM|reminder|no|flash|scheduler|no|no
+"Every day at 9 AM check my emails" → action|high|Set recurring action reminder: daily check emails at 9 AM|reminder|no|flash|scheduler|no|no
 "Call Mom" → action|high|Look up Mom's number and call|contacts,make_phone_call|no|flash|communicator|no|no
 "Text John hello" → action|high|Send WhatsApp to John: hello|contacts,send_whatsapp_message|no|flash|communicator|no|no
 "yes" (after bot proposed action) → action|high|Execute the proposed action|none|no|flash|operator|no|no
@@ -2271,7 +2293,16 @@ Examples:
 "Check moltbook status" → action|high|Check Moltbook feed and account status|moltbook|no|flash|operator|no|no
 "What's happening on moltbook" → action|high|Browse Moltbook feed|moltbook|no|flash|researcher|no|no
 "Post on moltbook" → action|high|Create a post on Moltbook|moltbook|no|quality|content_writer|no|no
+"Read this https://x.com/user/status/123" → action|high|Read the tweet|x_tool|no|flash|researcher|no|no
+"What does this tweet say? https://x.com/someone/status/456" → action|high|Read the tweet|x_tool|no|flash|researcher|no|no
 "Check polymarket" → action|high|Check Polymarket markets|polymarket|no|flash|researcher|no|no
+"Check out example.com" → action|high|Browse and discover APIs on example.com|discover_and_connect|no|flash|researcher|no|no
+"Explore this site: someapi.io" → action|high|Browse someapi.io and discover its API|discover_and_connect|no|flash|researcher|no|no
+"Find agent marketplaces and connect" → action|high|Search for agent marketplaces and connect|discover_and_connect,web_search|no|flash|researcher|no|no
+"Most agents aren't smart" → conversation|high|none|none|no|flash|none|no|no
+"AI is changing everything" → conversation|high|none|none|no|flash|none|no|no
+"That platform looks interesting" → conversation|high|none|none|no|flash|none|no|no
+"I think we need better tools" → conversation|high|none|none|no|flash|none|no|no
 "Do the thing" (no context) → clarify|low|What would you like me to do?|none|no|flash|none|no|no"""
 
             # Try primary intent client (Gemini Flash via LiteLLM)
@@ -2894,6 +2925,7 @@ Examples:
                                 success=False,
                                 tool_used=action["tool_name"],
                                 context="content_rejected",
+                                episode_type="content_rejected",
                             )
                         except Exception:
                             pass
@@ -3020,6 +3052,7 @@ Examples:
                             success=True,
                             tool_used=tool_name,
                             context="content_approved",
+                            episode_type="content_approved",
                         )
                     except Exception:
                         pass
@@ -3141,6 +3174,7 @@ Examples:
                 success=False,
                 context=f"Original response was: {last_response[:100]}",
                 tool_used="correction",
+                episode_type="correction",
             )
             logger.info(f"Stored correction: {message[:60]}")
             # Store in working memory for visible acknowledgment
@@ -3913,8 +3947,11 @@ IDENTITY & REPRESENTATION:
 {self._CAPABILITIES}
 
 SKILL AWARENESS (CRITICAL):
-- When asked to interact with an unfamiliar platform or service (one you don't have a dedicated tool for), FIRST check if that platform provides an API spec at their website (e.g. example.com/skill.md or example.com/api-spec). If a spec exists, use your skill-learning capability to learn it and build a proper integration — do NOT resort to raw bash/curl commands as a workaround.
-- If you already have a tool for a platform, use it. If you don't, learn it. Only fall back to bash/curl if no API spec can be found.
+- When given a tweet/X URL (x.com/*/status/* or twitter.com/*/status/*), ALWAYS use x_tool with operation=get_tweet. NEVER use browser or web_fetch for tweet URLs — the X tool reads them directly via API.
+- When asked to check out, explore, or connect to any website, platform, or service, use discover_and_connect to autonomously browse it, discover its API, evaluate usefulness and safety, and connect. This works for ANY URL — not just known API specs.
+- When asked to find a type of service (e.g. "find agent marketplaces"), use web_search first, then discover_and_connect on the results.
+- When asked to interact with an unfamiliar platform (one you don't have a dedicated tool for), use discover_and_connect to browse and integrate it automatically. If that fails, check if the platform provides an API spec (e.g. example.com/skill.md) and use learn_skill to learn it.
+- If you already have a tool for a platform, use it. If you don't, discover and connect. Only fall back to bash/curl if discovery finds no API.
 
 AUTONOMY & REASONING (CRITICAL):
 - NEVER hallucinate, guess, or assume information you don't have.

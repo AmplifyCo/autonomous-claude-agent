@@ -162,6 +162,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
         # Initialize monitoring systems
         logger.info("📊 Initializing monitoring systems...")
         telegram = TelegramNotifier(config.telegram_bot_token, config.telegram_chat_id)
+        from src.utils.api_alert import init as _init_api_alert
+        _init_api_alert(telegram)
         dashboard = Dashboard(config.dashboard_host, config.dashboard_port)
 
         # Configure webhook security (Twilio HMAC-SHA1 + Telegram secret token)
@@ -361,6 +363,7 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             if gemini_client:
                 logger.info("✨ LiteLLM unified routing enabled — Gemini Flash + Claude Sonnet")
                 agent.gemini_client = gemini_client
+                agent_factory.gemini_client = gemini_client  # SubAgents route Gemini models via LiteLLM
 
             # Initialize Grok client
             grok_api_key = os.getenv("GROK_API_KEY", "")
@@ -422,7 +425,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             )
             conversation_manager.intent_data_collector = intent_data_collector
             # Wire memory sources into MemoryQueryTool (mid-task active memory reasoning)
-            agent.tools.set_memory_sources(brain=digital_brain, episodic_memory=episodic_memory)
+            _llm_for_memory = gemini_client if 'gemini_client' in locals() and gemini_client else None
+            agent.tools.set_memory_sources(brain=digital_brain, episodic_memory=episodic_memory, llm_client=_llm_for_memory)
 
             logger.info("🧠 WorkingMemory + EpisodicMemory + IntentDataCollector + MemoryQueryTool wired")
 
@@ -463,6 +467,10 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             )
             agent.tools.set_skill_learner(skill_learner)
             logger.info("🎓 SkillLearner initialized (learn new tools from .md specs)")
+
+            # Wire DiscoverTool with LLM + SkillLearner
+            agent.tools.set_discover_deps(_gemini_for_skills, skill_learner)
+            logger.info("🔍 DiscoverTool wired (autonomous API discovery)")
 
             # MCP Server Tools (Phase 5A) — config-driven, auto-discovered
             agent.tools.set_mcp_credential_resolver(credential_store.resolve)
@@ -530,6 +538,9 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 if 'task_queue' in locals():
                     dashboard.set_task_queue(task_queue)
                 dashboard.set_brain(digital_brain)
+                dashboard.set_tool_registry(agent.tools)
+                if 'working_memory' in locals():
+                    dashboard.set_working_memory(working_memory)
 
             logger.info("💬 Telegram chat interface initialized (channel-agnostic architecture)")
             if twilio_whatsapp_channel and twilio_whatsapp_channel.enabled:
@@ -646,6 +657,7 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
 
             # Wire pattern detector + contact intelligence into attention engine
             _contact_intel = contact_intelligence if 'contact_intelligence' in locals() else None
+            _task_queue_for_attention = task_queue if 'task_queue' in locals() else None
             _attention_engine = AttentionEngine(
                 digital_brain=digital_brain,
                 llm_client=_gemini_for_attention,
@@ -654,6 +666,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
                 purpose=_nova_purpose,
                 pattern_detector=_pattern_detector,
                 contact_intelligence=_contact_intel,
+                episodic_memory=episodic_memory,
+                task_queue=_task_queue_for_attention,
             )
             attention_task = asyncio.create_task(_attention_engine.start())
             logger.info("🔍 AttentionEngine started (proactive observations every 6h)")
@@ -701,6 +715,8 @@ Models: Claude Opus/Sonnet/Haiku + SmolLM2 (local fallback)"""
             tool_registry=agent.tools if _self_healing_enabled else None
         )
         self_healing_task = asyncio.create_task(self_healing.start())
+        if dashboard.enabled:
+            dashboard.set_self_healing_monitor(self_healing)
         if _self_healing_enabled:
             logger.info("🔧 Self-healing monitor started with auto-fix ENABLED")
         else:
