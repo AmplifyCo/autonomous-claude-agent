@@ -458,8 +458,10 @@ class Dashboard:
                                 result = await wallet_tool._balance(chain)
                                 if result.success and result.metadata:
                                     wallets[chain] = result.metadata
-                            except Exception:
-                                pass
+                                elif not result.success:
+                                    logger.debug(f"Wallet {chain} balance failed: {result.error}")
+                            except Exception as we:
+                                logger.warning(f"Wallet {chain} exception: {we}")
                 except Exception as e:
                     logger.warning(f"api_wallet error: {e}")
             return {"wallets": wallets}
