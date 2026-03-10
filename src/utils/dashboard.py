@@ -459,7 +459,7 @@ class Dashboard:
                                 if result.success and result.metadata:
                                     wallets[chain] = result.metadata
                                 elif not result.success:
-                                    logger.debug(f"Wallet {chain} balance failed: {result.error}")
+                                    logger.warning(f"Wallet {chain} balance failed: {result.error}")
                             except Exception as we:
                                 logger.warning(f"Wallet {chain} exception: {we}")
                 except Exception as e:
