@@ -1118,7 +1118,7 @@ sudo systemctl restart novabot</pre>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     *{{margin:0;padding:0;box-sizing:border-box}}
-    body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a0a;color:#e0e0e0;height:100vh;display:flex;flex-direction:column;overflow:hidden}}
+    body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a0a;color:#e0e0e0;min-height:100vh;display:flex;flex-direction:column;overflow-y:auto}}
 
     /* ── Top bar ─────────── */
     .topbar{{background:#111;border-bottom:1px solid #222;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}}
@@ -1143,7 +1143,7 @@ sudo systemctl restart novabot</pre>
     .stat-lbl{{font-size:0.7em;color:#555;margin-top:3px}}
 
     /* ── Grid layout ────── */
-    .grid{{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;overflow:hidden;gap:0}}
+    .grid{{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;min-height:60vh;overflow:hidden;gap:0}}
     .panel{{display:flex;flex-direction:column;overflow:hidden;border:1px solid #1a1a1a}}
     .panel-hdr{{padding:8px 14px;background:#141414;border-bottom:1px solid #222;font-size:0.82em;font-weight:600;color:#999;flex-shrink:0;display:flex;align-items:center;gap:6px}}
     .panel-body{{flex:1;overflow-y:auto;padding:10px 14px;font-size:0.84em}}
