@@ -1338,13 +1338,18 @@ sudo systemctl restart novabot</pre>
       </div>
     </div>
 
-    <!-- Bottom-left: Chat -->
-    <div class="panel">
-      <div class="panel-hdr">💬 Chat with {bot_name}</div>
-      <div class="chat-messages" id="chat-messages"></div>
-      <div class="chat-input-area">
-        <input id="chat-input" type="text" placeholder="Message {bot_name}…" autocomplete="off"/>
-        <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+    <!-- Bottom-left: Chat (collapsible) -->
+    <div class="panel" id="chat-panel">
+      <div class="panel-hdr" style="cursor:pointer;user-select:none" onclick="toggleChat()">
+        <span class="arrow" id="chat-arrow" style="font-size:0.7em;transition:transform .2s">&#9660;</span>
+        💬 Chat with {bot_name}
+      </div>
+      <div id="chat-body">
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-area">
+          <input id="chat-input" type="text" placeholder="Message {bot_name}…" autocomplete="off"/>
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
       </div>
     </div>
 
@@ -1564,6 +1569,11 @@ sudo systemctl restart novabot</pre>
 
     /* ── Guides ─────────────────────── */
     let _activeGuide=null;
+    function toggleChat(){{
+      const body=document.getElementById('chat-body'),arrow=document.getElementById('chat-arrow'),panel=document.getElementById('chat-panel');
+      if(body.style.display==='none'){{body.style.display='';arrow.innerHTML='&#9660;';panel.style.minHeight='';}}
+      else{{body.style.display='none';arrow.innerHTML='&#9654;';panel.style.minHeight='auto';}}
+    }}
     function toggleGuides(){{
       const c=document.getElementById('guides-content'),a=document.getElementById('guides-arrow');
       c.classList.toggle('open');a.classList.toggle('open');
